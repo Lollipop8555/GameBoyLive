@@ -1,0 +1,60 @@
+:root {
+  --bg: #05070b;
+  --bg-soft: #0b1018;
+  --line: #1d2430;
+  --line-soft: rgba(255, 255, 255, 0.08);
+  --text: #e8edf5;
+  --text-dim: #7c8798;
+  --accent: #59e7ff;
+  --accent-2: #ff5bc8;
+  --ok: #3ddc84;
+  --bad: #ff5f6d;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+/* 深空暗场：一点冷光打在上方，右下反弹一点洋红，玻璃外壳才有东西可折射 */
+body {
+  background:
+    radial-gradient(64% 46% at 50% -6%, rgba(56, 96, 148, 0.5) 0%, rgba(10, 14, 22, 0) 62%),
+    radial-gradient(52% 40% at 84% 102%, rgba(120, 34, 96, 0.28) 0%, rgba(10, 14, 22, 0) 64%),
+    radial-gradient(46% 38% at 8% 88%, rgba(14, 78, 92, 0.24) 0%, rgba(10, 14, 22, 0) 62%),
+    linear-gradient(180deg, #080b11 0%, #05070b 58%, #04060a 100%);
+  color: var(--text);
+  font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+
+/* 极细扫描线，只在大屏加，手机上会跟像素格打架 */
+@media (min-width: 900px) {
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 9;
+    background-image: repeating-linear-gradient(
+      0deg,
+      rgba(255, 255, 255, 0.028) 0 1px,
+      transparent 1px 3px
+    );
+    opacity: 0.5;
+    mix-blend-mode: overlay;
+  }
+}
+
+::selection {
+  background: rgba(89, 231, 255, 0.28);
+}

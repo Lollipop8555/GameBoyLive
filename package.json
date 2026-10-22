@@ -1,0 +1,27 @@
+{
+  "name": "gameboy-live",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "prepare:wasm": "node scripts/copy-wasm.mjs",
+    "predev": "npm run prepare:wasm",
+    "dev": "vite",
+    "prebuild": "npm run prepare:wasm",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc --noEmit",
+    "postinstall": "npm run prepare:wasm"
+  },
+  "dependencies": {
+    "@wasm-gaming/mgba-wasm": "^0.1.1",
+    "vue": "^3.5.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.0",
+    "@wasm-gaming/engine-specs": "^0.3.2",
+    "typescript": "~5.9.0",
+    "vite": "^7.0.0",
+    "vue-tsc": "^3.0.0"
+  }
+}
