@@ -1,40 +1,41 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { EmulatorAdapter } from '../core/EmulatorAdapter'
+import { checkEnvironment, describeError } from '../core/errors'
+import { gameUrl, type GameEntry } from '../core/GameCatalog'
 import { toEngineInput } from '../core/InputManager'
 import { readRom } from '../core/romInfo'
+import { readRomData, saveRom } from '../core/RomLibrary'
 import { download, readSram, safeFileName, writeSram } from '../core/StorageService'
 import type { RomInfo } from '../core/types'
 import Dropzone from '../ui/Dropzone.vue'
 import KeymapPanel from '../ui/KeymapPanel.vue'
+import LibraryPanel from '../ui/LibraryPanel.vue'
 import SavePanel from '../ui/SavePanel.vue'
 import Screen from '../ui/Screen.vue'
+import SettingsPanel from '../ui/SettingsPanel.vue'
 import ShellGlass from '../ui/shells/ShellGlass.vue'
 import { GLASS_RATIO } from '../ui/shells/geometry'
 import Toolbar from '../ui/Toolbar.vue'
 import TouchDeck from '../ui/TouchDeck.vue'
-import { settings, session, toggleDisplayMode, ui } from './store'
+import { followViewport, settings, session, toggleDisplayMode, ui } from './store'
 
 const adapter = shallowRef<EmulatorAdapter | null>(null)
 const canvasEl = ref<HTMLCanvasElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const dragging = ref(false)
 const paused = ref(false)
-const coarse = ref(false)
 
 let frameTick = 0
 let dragDepth = 0
-let pointerQuery: MediaQueryList | null = null
 
 const model = computed(() => session.rom?.model ?? 'agb')
 const mode = computed(() => settings.displayMode)
 const glassRatio = computed(() => GLASS_RATIO[model.value])
+/** 刻在机身上的游戏名：优先卡带内部标题，没有才退回文件名 */
+const cartTitle = computed(() => (session.rom ? session.rom.title || session.rom.name : ''))
 /** 面板模式默认给触控，桌面按 ` 切进去也能用鼠标点 */
 const touchOn = computed(() => settings.touchLayer !== 'off')
-
-function syncPointer(event: MediaQueryList | MediaQueryListEvent) {
-  coarse.value = event.matches
-}
 
 function adoptCanvas(el: HTMLCanvasElement) {
   canvasEl.value = el
@@ -50,6 +51,7 @@ async function bootEngine(bytes: Uint8Array, info: RomInfo) {
 
   if (!canvasEl.value) throw new Error('画布尚未挂载')
   frameTick = 0
+  session.loadNote = ''
 
   await next.boot({
     canvas: canvasEl.value,
@@ -71,9 +73,19 @@ async function bootEngine(bytes: Uint8Array, info: RomInfo) {
   session.phase = 'playing'
 }
 
+/** 出错时统一落到「屏幕里说清楚 + 给下一步」，不在 stage 上甩一行红字。 */
+function fail(error: unknown) {
+  const advice = describeError(error)
+  session.phase = 'error'
+  session.error = advice.message
+  session.errorHint = advice.hint
+}
+
 async function openFile(file: File) {
   session.phase = 'loading'
   session.error = ''
+  session.errorHint = ''
+  session.loadNote = '读取 ROM…'
 
   try {
     const { bytes, info } = await readRom(file)
@@ -81,10 +93,49 @@ async function openFile(file: File) {
     session.aspect = ''
     romBytes.value = bytes
     await bootEngine(bytes, info)
+    // 缓存只为下次方便，写不进去（配额满、隐私模式）不影响本次游玩
+    if (settings.cacheRoms) void saveRom(info, bytes).catch(() => {})
   } catch (error) {
-    session.phase = 'error'
-    session.error = error instanceof Error ? error.message : String(error)
+    fail(error)
   }
+}
+
+/** 预置游戏：先按需下载字节，之后和拖入文件走完全同一条路。 */
+async function openBundled(game: GameEntry) {
+  ui.libraryOpen = false
+  session.phase = 'loading'
+  session.error = ''
+  session.errorHint = ''
+  session.loadNote = `正在下载 ${game.title}…`
+
+  try {
+    const response = await fetch(gameUrl(game.file))
+    if (!response.ok) throw new Error(`下载 ${game.title} 失败（HTTP ${response.status}）`)
+    const blob = await response.blob()
+    await openFile(new File([blob], game.file))
+  } catch (error) {
+    fail(error)
+  } finally {
+    session.loadNote = ''
+  }
+}
+
+/** 从最近游戏取回字节：走和选文件同一条路，缓存时间顺带刷新。 */
+async function loadFromLibrary(id: string) {
+  ui.libraryOpen = false
+  try {
+    const hit = await readRomData(id)
+    if (!hit) throw new Error('本地缓存里找不到这个 ROM，请重新选择文件')
+    await openFile(new File([hit.bytes.slice()], hit.record.name))
+  } catch (error) {
+    fail(error)
+  }
+}
+
+/** 最近游戏里点「从文件打开」：先收面板，再弹文件选择框。 */
+function openFileDialog() {
+  ui.libraryOpen = false
+  pickFile()
 }
 
 function togglePause() {
@@ -107,10 +158,15 @@ function exitToIdle() {
   romBytes.value = null
   session.rom = null
   session.phase = 'idle'
+  session.error = ''
+  session.errorHint = ''
+  session.loadNote = ''
   session.aspect = ''
   session.fps = 0
   paused.value = false
   ui.saveOpen = false
+  ui.settingsOpen = false
+  ui.libraryOpen = false
 }
 
 /* ---------------- 存档 ---------------- */
@@ -190,9 +246,18 @@ function onDrop(event: DragEvent) {
   if (file) void openFile(file)
 }
 
+/** 设置里点「打开键位编辑器」：先收设置面板，再交给键位面板 */
+function openKeymap() {
+  ui.settingsOpen = false
+  ui.keymapOpen = true
+}
+
 function onKeyDown(event: KeyboardEvent) {
   // 键位面板自己处理键盘（捕获阶段已拦下），这里不能再抢
   if (ui.keymapOpen) return
+  // 设置面板自己吃 Esc，别顺手把游戏暂停掉
+  if (ui.settingsOpen) return
+  if (ui.libraryOpen) return
   // 存档面板里 Esc 只用来关面板，别顺手把游戏暂停掉
   if (ui.saveOpen) {
     if (event.code === 'Escape') {
@@ -262,22 +327,21 @@ watch(
 )
 
 onMounted(() => {
+  // 跑不起来的环境在首屏就说清楚，别等用户拖进 ROM
+  const blocked = checkEnvironment()
+  if (blocked) {
+    session.phase = 'error'
+    session.error = blocked.message
+    session.errorHint = blocked.hint
+  }
+
   window.addEventListener('keydown', onKeyDown)
   window.addEventListener('dragenter', onDragEnter)
   window.addEventListener('dragover', onDragOver)
   window.addEventListener('dragleave', onDragLeave)
   window.addEventListener('drop', onDrop)
-
-  pointerQuery = window.matchMedia?.('(pointer: coarse)') ?? null
-  if (pointerQuery) {
-    syncPointer(pointerQuery)
-    pointerQuery.addEventListener('change', syncPointer)
-  }
-
-  // 触屏小窗（手机竖屏或横屏）刷新回来一律回面板：
-  // 整机模式在手机上按键按不准，存档里若是桌面调试留下的 full 会让布局显得"不会自适应"
-  const small = window.innerWidth < 768 || window.innerHeight < 620
-  if (coarse.value && small && settings.displayMode === 'full') settings.displayMode = 'focus'
+  // 拖窗口或切设备模拟时视口跳档，模式要跟着走
+  window.addEventListener('resize', followViewport)
 })
 
 onBeforeUnmount(() => {
@@ -286,7 +350,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('dragover', onDragOver)
   window.removeEventListener('dragleave', onDragLeave)
   window.removeEventListener('drop', onDrop)
-  pointerQuery?.removeEventListener('change', syncPointer)
+  window.removeEventListener('resize', followViewport)
   adapter.value?.destroy()
 })
 </script>
@@ -301,8 +365,10 @@ onBeforeUnmount(() => {
         :active="session.phase !== 'idle'"
         @pause="togglePause"
         @open="pickFile"
+        @library="ui.libraryOpen = true"
         @keys="ui.keymapOpen = true"
         @saves="ui.saveOpen = true"
+        @settings="ui.settingsOpen = true"
         @exit="exitToIdle"
       />
     </header>
@@ -312,31 +378,33 @@ onBeforeUnmount(() => {
       <div class="stage__mesh" aria-hidden="true" />
 
       <div class="rig" :data-mode="mode" :style="{ '--glass-ratio': glassRatio }">
-        <ShellGlass :model="model" :mode="mode">
-          <Screen @ready="adoptCanvas" />
+        <ShellGlass :model="model" :mode="mode" :title="cartTitle">
+          <Screen @ready="adoptCanvas" @pick="pickFile" />
         </ShellGlass>
 
         <TouchDeck v-if="touchOn" :mode="mode === 'focus' ? 'panel' : 'full'" />
       </div>
-
-      <p v-if="session.phase === 'error'" class="error">{{ session.error }}</p>
     </main>
 
+    <!-- 游戏信息刻在机身铭牌上，这条只留操作提示；面板模式下没有提示就整条收起 -->
     <footer class="hintbar">
-      <template v-if="mode === 'focus'">
-        <span v-if="session.rom">{{ session.rom.model.toUpperCase() }} · {{ session.rom.title || session.rom.name }}</span>
-      </template>
-      <template v-else>
-        <span v-if="session.rom">{{ session.rom.model.toUpperCase() }} · {{ session.rom.title || session.rom.name }}</span>
-        <span v-else>拖入 .gba / .gb / .gbc / .zip</span>
+      <template v-if="mode !== 'focus'">
+        <span v-if="!session.rom">拖入 .gba / .gb / .gbc / .zip</span>
         <span class="dim">键下标注为当前键位 · <kbd>`</kbd> 面板 · <kbd>Esc</kbd> 暂停</span>
       </template>
-      <span v-if="paused" class="paused">已暂停</span>
     </footer>
 
     <input ref="fileInput" type="file" accept=".gba,.gb,.gbc,.sgb,.zip" hidden @change="onPick" />
     <Dropzone :active="dragging" />
+    <LibraryPanel
+      v-if="ui.libraryOpen"
+      @close="ui.libraryOpen = false"
+      @pick="loadFromLibrary"
+      @bundle="openBundled"
+      @open="openFileDialog"
+    />
     <KeymapPanel v-if="ui.keymapOpen" @close="ui.keymapOpen = false" />
+    <SettingsPanel v-if="ui.settingsOpen" @close="ui.settingsOpen = false" @keys="openKeymap" />
     <SavePanel
       v-if="ui.saveOpen && session.rom"
       :rom-id="session.rom.id"
@@ -478,21 +546,6 @@ onBeforeUnmount(() => {
   transition: opacity 140ms ease;
 }
 
-.error {
-  position: absolute;
-  bottom: 12px;
-  left: 50%;
-  transform: translateX(-50%);
-  margin: 0;
-  padding: 8px 14px;
-  border-radius: 8px;
-  background: rgba(255, 92, 108, 0.12);
-  border: 1px solid rgba(255, 92, 108, 0.4);
-  color: #ffb3ba;
-  font-size: 12.5px;
-  max-width: min(640px, 90vw);
-}
-
 .hintbar {
   display: flex;
   align-items: center;
@@ -523,10 +576,7 @@ onBeforeUnmount(() => {
   background: rgba(255, 255, 255, 0.05);
 }
 
-.paused {
-  margin-left: auto;
-  color: #ffd27a;
-}
+
 
 @media (max-width: 767px) {
   .app {
@@ -571,6 +621,15 @@ onBeforeUnmount(() => {
      所以屏幕不必为它缩：高度按 74cqh 给足，只要底部不顶到起停键 */
   .stage[data-mode='focus'] :deep(.screen) {
     width: min(92cqw, calc(74cqh * var(--lcd-ratio)));
+  }
+}
+
+/* 屏幕仓变成三列「铭文 | 屏幕 | 铭文」之后，按键就贴在窗口外面了：
+   宽度预算 = 视口 − 两侧按键区 − 两侧铭文区（含衬圈）。
+   ≤520 的横屏放不下三列，仍走屏幕上方的铭牌，屏幕尺寸不变 */
+@media (orientation: landscape) and (max-height: 620px) and (min-width: 521px) {
+  .stage[data-mode='focus'] :deep(.screen) {
+    width: min(calc(100cqw - 336px), calc(74cqh * var(--lcd-ratio)));
   }
 }
 </style>

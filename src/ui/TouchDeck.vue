@@ -114,7 +114,12 @@ const bind = (action: KeyAction) => ({
 </script>
 
 <template>
-  <div class="deck" :data-model="session.rom?.model ?? 'agb'" :data-mode="props.mode">
+  <div
+    class="deck"
+    :class="{ 'deck--bare': !settings.badges }"
+    :data-model="session.rom?.model ?? 'agb'"
+    :data-mode="props.mode"
+  >
     <div v-if="hasShoulders" class="deck__shoulders">
       <button class="shoulder shoulder--l" v-bind="bind('l')" :class="{ on: isOn('l') }">
         <span class="key__main">L</span>
@@ -230,6 +235,11 @@ const bind = (action: KeyAction) => ({
 /* 键位本来就是方向键时，字符轻一点：和箭头图形重复，别抢戏但要看得到 */
 .key__cap--same {
   opacity: 0.72;
+}
+
+/* 关掉「键位标注」：键帽只剩箭头和字母，给不想被提示干扰的人 */
+.deck--bare .key__cap {
+  display: none;
 }
 
 .dpad__key.on .key__cap,

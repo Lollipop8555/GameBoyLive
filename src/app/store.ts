@@ -10,9 +10,13 @@ export type TouchLayerMode = 'auto' | 'on' | 'off'
 
 interface Settings {
   displayMode: DisplayMode
+  /** 用户手动选过模式：为真时不再按屏幕尺寸纠正默认值。 */
+  modePinned: boolean
   filter: FilterId
   volume: number
   muted: boolean
+  /** 把 ROM 留在 IndexedDB 里做「最近游戏」，关掉后不再新增，已有的保留。 */
+  cacheRoms: boolean
   badges: boolean
   touchLayer: TouchLayerMode
   showFps: boolean
@@ -23,24 +27,35 @@ interface Session {
   phase: Phase
   rom: RomInfo | null
   error: string
+  /** 错误之后该做什么：屏幕里跟着错误一起显示，别让人对着红字发呆。 */
+  errorHint: string
+  /** 加载阶段的自定义说明（下载预置 ROM / 读文件），空则由屏幕给默认文案。 */
+  loadNote: string
   fps: number
   aspect: string
 }
 
 const SETTINGS_KEY = 'gbl.settings.v1'
 
-/** 触屏设备直接进面板模式：整机缩小后按键根本按不到。 */
-function prefersPanel(): boolean {
+/** 窄屏或矮屏（手机竖屏、横屏）：整机缩进去之后按键根本按不准。 */
+export function viewportIsSmall(): boolean {
   if (typeof window === 'undefined') return false
-  return window.matchMedia?.('(pointer: coarse)').matches ?? false
+  return window.innerWidth < 768 || window.innerHeight < 620
+}
+
+/** 默认值跟屏幕走：小屏进面板，大屏进整机。 */
+function defaultDisplayMode(): DisplayMode {
+  return viewportIsSmall() ? 'focus' : 'full'
 }
 
 function loadSettings(): Settings {
   const base: Settings = {
-    displayMode: prefersPanel() ? 'focus' : 'full',
+    displayMode: defaultDisplayMode(),
+    modePinned: false,
     filter: 'auto',
     volume: 0.7,
     muted: false,
+    cacheRoms: true,
     badges: true,
     touchLayer: 'auto',
     showFps: false,
@@ -51,11 +66,17 @@ function loadSettings(): Settings {
     const raw = localStorage.getItem(SETTINGS_KEY)
     if (!raw) return base
     const saved = JSON.parse(raw) as Partial<Settings>
+    // 老存档没有 modePinned：当作没选过，按当前屏幕重新给默认值
+    const pinned = saved.modePinned === true
     return {
       ...base,
       ...saved,
-      displayMode:
-        saved.displayMode === 'focus' || saved.displayMode === 'full' ? saved.displayMode : base.displayMode,
+      displayMode: pinned
+        ? saved.displayMode === 'focus' || saved.displayMode === 'full'
+          ? saved.displayMode
+          : base.displayMode
+        : base.displayMode,
+      modePinned: pinned,
       volume: typeof saved.volume === 'number' ? Math.min(1, Math.max(0, saved.volume)) : base.volume,
       keymap: normalizeKeymap(saved.keymap),
     }
@@ -72,12 +93,18 @@ export const ui = reactive({
   keymapOpen: false,
   /** 存档面板：打开时游戏暂停，关掉回到原来的运行状态。 */
   saveOpen: false,
+  /** 设置面板：只改配置，游戏继续跑（音量/滤镜都是即时生效的）。 */
+  settingsOpen: false,
+  /** 最近游戏：打开时游戏暂停，选完直接换 ROM。 */
+  libraryOpen: false,
 })
 
 export const session = reactive<Session>({
   phase: 'idle',
   rom: null,
   error: '',
+  errorHint: '',
+  loadNote: '',
   fps: 0,
   aspect: '',
 })
@@ -100,6 +127,28 @@ export function effectiveFilter(): Exclude<FilterId, 'auto'> {
   return session.rom?.model === 'dmg' ? 'dmglcd' : 'original'
 }
 
+/** 手动选过之后就不再跟屏幕尺寸走，刷新也保留。 */
+export function setDisplayMode(mode: DisplayMode): void {
+  settings.modePinned = true
+  settings.displayMode = mode
+}
+
+/** 记着上次是按哪一档给的默认值，用来判断视口有没有跨档。 */
+let smallViewport = viewportIsSmall()
+
+/**
+ * 视口跨过尺寸档（拖窗口、开发者工具切设备）时立刻换成该档的默认模式。
+ * 同一档内不动，用户手动选的模式才留得住。
+ */
+export function followViewport(): void {
+  const small = viewportIsSmall()
+  if (small === smallViewport) return
+  smallViewport = small
+  // 换档了，之前手选的模式不再代表这块屏幕的意图
+  settings.modePinned = false
+  settings.displayMode = small ? 'focus' : 'full'
+}
+
 export function toggleDisplayMode(): void {
-  settings.displayMode = settings.displayMode === 'full' ? 'focus' : 'full'
+  setDisplayMode(settings.displayMode === 'full' ? 'focus' : 'full')
 }

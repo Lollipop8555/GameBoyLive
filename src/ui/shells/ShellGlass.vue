@@ -7,17 +7,24 @@ import type { Model } from '../../core/types'
  * 看得见内部结构、边缘一圈折射亮边、外面板蚀刻细字。
  * 屏幕由父级通过默认插槽放进屏幕仓。
  */
-const props = defineProps<{ model: Model; mode: 'full' | 'focus' }>()
+const props = defineProps<{
+  model: Model
+  mode: 'full' | 'focus'
+  /** 卡带头里的内部标题：刻在机身上的当前游戏名 */
+  title?: string
+}>()
 
-const NAMES: Record<Model, { head: string; foot: string }> = {
-  dmg: { head: 'GAME BOY', foot: 'DOT MATRIX · 1989' },
-  sgb: { head: 'SUPER GAME BOY', foot: 'SGB · 1994' },
-  cgb: { head: 'GAME BOY COLOR', foot: 'COLOR LCD · 1998' },
-  agb: { head: 'GAME BOY ADVANCE', foot: '32-BIT · 2001' },
+const NAMES: Record<Model, { head: string; foot: string; code: string; lcd: string }> = {
+  dmg: { head: 'GAME BOY', foot: 'DOT MATRIX · 1989', code: 'DMG-01', lcd: '160 × 144' },
+  sgb: { head: 'SUPER GAME BOY', foot: 'SGB · 1994', code: 'SGB-001', lcd: '160 × 144' },
+  cgb: { head: 'GAME BOY COLOR', foot: 'COLOR LCD · 1998', code: 'CGB-001', lcd: '160 × 144' },
+  agb: { head: 'GAME BOY ADVANCE', foot: '32-BIT · 2001', code: 'AGB-001', lcd: '240 × 160' },
 }
 
 const name = computed(() => NAMES[props.model])
 const key = computed(() => (props.model === 'agb' ? 'agb' : 'gb'))
+/** 没插卡时不印铭牌：首屏已经有「未插卡」的开机画面，别重复 */
+const cart = computed(() => props.title?.trim() || '')
 </script>
 
 <template>
@@ -32,6 +39,30 @@ const key = computed(() => (props.model === 'agb' ? 'agb' : 'gb'))
       </div>
 
       <div class="glass__bay">
+        <!-- 面板模式的铭牌：贴在屏幕上方，印机型参数与当前卡带 -->
+        <div v-if="cart" class="glass__plate">
+          <span class="plate__row">
+            <span>{{ name.foot }}</span>
+            <span>{{ name.code }}</span>
+          </span>
+          <span class="plate__row plate__row--game">
+            <span class="plate__game">{{ cart }}</span>
+            <span>{{ name.lcd }}</span>
+          </span>
+        </div>
+
+        <!-- 横屏面板：屏幕两侧的竖排铭文，挂在衬圈外侧跟着屏幕走 -->
+        <div v-if="cart" class="glass__sides">
+          <div class="side side--left">
+            <span>{{ name.foot }}</span>
+            <span>{{ name.code }}</span>
+          </div>
+          <div class="side side--right">
+            <span class="plate__game">{{ cart }}</span>
+            <span>{{ name.lcd }}</span>
+          </div>
+        </div>
+
         <div class="glass__bay-inner">
           <slot />
         </div>
@@ -39,6 +70,7 @@ const key = computed(() => (props.model === 'agb' ? 'agb' : 'gb'))
 
       <div class="glass__foot">
         <span>{{ name.foot }}</span>
+        <span v-if="cart" class="glass__cart">{{ cart }}</span>
         <span class="glass__mark">GLASS EDITION</span>
       </div>
 
@@ -218,9 +250,31 @@ const key = computed(() => (props.model === 'agb' ? 'agb' : 'gb'))
   pointer-events: none;
 }
 
+/* 卡带铭牌：机身下沿的印刷行里，静态参数之后跟当前游戏 */
+.glass__cart {
+  min-width: 0;
+  padding-left: clamp(6px, 2.2%, 16px);
+  border-left: 1px solid rgba(var(--tint), 0.42);
+  color: rgba(var(--tint), 0.78);
+  letter-spacing: 0.26em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .glass__mark {
+  flex-shrink: 0;
   margin-left: auto;
   color: rgba(var(--tint), 0.5);
+}
+
+/* 面板模式铭牌：默认只在 focus 下出现；横屏改由两侧竖排的 .glass__sides 接手 */
+.glass__plate {
+  display: none;
+}
+
+.glass__sides {
+  display: none;
 }
 
 /* 四角螺丝：内部结构的暗示 */
@@ -319,26 +373,84 @@ const key = computed(() => (props.model === 'agb' ? 'agb' : 'gb'))
   display: none;
 }
 
+/* 面板模式沿用整机那一圈衬圈：外层金属圈 + 内层屏幕凹口，
+   只把尺寸从"按机身比例"改成"贴住屏幕"，边框语言完全一致 */
 .glass[data-mode='focus'] .glass__bay {
   position: relative;
   inset: auto;
-  width: 100%;
-  padding: 0;
+  width: max-content;
+  max-width: 100%;
+  padding: clamp(4px, 1.2vmin, 10px);
   transform: none;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
+  border-radius: 12px;
+  background: linear-gradient(168deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.03) 46%, rgba(0, 0, 0, 0.34));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.7),
+    0 0 0 1px rgba(255, 255, 255, 0.14),
+    0 14px 34px -10px rgba(0, 0, 0, 0.9);
   display: grid;
   place-items: center;
 }
 
+/* 丝印小字：屏幕上方那块铭牌和横屏两侧的竖排铭文是同一套字阶——
+   同一个字重、字距、色阶，只是排列方向不同 */
+.glass[data-mode='focus'] .glass__plate,
+.glass[data-mode='focus'] .side {
+  font: 600 clamp(6px, 1.5cqh, 9.5px) / 1.25 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.2em;
+  color: rgba(226, 238, 252, 0.3);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
+
+/* 铭牌贴在屏幕上方，和屏幕同宽（bay 的盒宽包含那圈金属衬圈）：
+   两行右对齐的参数行 + 一条渐隐细线，像丝印在玻璃上的一小块标签 */
+.glass[data-mode='focus'] .glass__plate {
+  display: grid;
+  gap: clamp(3px, 0.8cqh, 7px);
+  width: 100%;
+  margin-bottom: clamp(9px, 2.4cqh, 20px);
+  padding-bottom: clamp(7px, 1.8cqh, 14px);
+  border-bottom: 1px solid rgba(var(--tint), 0.16);
+}
+
+.plate__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.plate__row--game {
+  color: rgba(226, 238, 252, 0.46);
+}
+
+/* 右侧参数不参与压缩，超长的是左边的游戏名 */
+.plate__row > :last-child {
+  flex-shrink: 0;
+}
+
+.plate__game {
+  min-width: 0;
+  font-weight: 700;
+  letter-spacing: 0.3em;
+  color: rgba(var(--tint), 0.85);
+  text-shadow:
+    0 1px 0 rgba(0, 0, 0, 0.6),
+    0 0 12px rgba(var(--tint), 0.35);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .glass[data-mode='focus'] .glass__bay-inner {
-  border-radius: 8px;
-  background: #04060a;
+  border-radius: 6px;
+  background: #05070a;
   box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.9),
-    0 0 60px rgba(var(--tint), 0.16),
-    0 24px 60px -22px rgba(0, 0, 0, 0.95);
+    inset 0 0 0 1px rgba(0, 0, 0, 0.9),
+    inset 0 2px 14px rgba(0, 0, 0, 0.9),
+    0 0 22px rgba(var(--tint), 0.14);
 }
 
 /* 横屏：按键退到两侧，屏幕不再需要贴着它们。
@@ -349,6 +461,57 @@ const key = computed(() => (props.model === 'agb' ? 'agb' : 'gb'))
        底部让出 START/SELECT 那一条（36 高 + 6 边距）再多 26 的空气 */
     place-items: end center;
     padding-bottom: 68px;
+  }
+
+  /* 屏幕两侧的铭文是窗口的一部分，不是贴在窗口外面的装饰：
+     屏幕仓从「一格里放屏幕」变成三列「铭文 | 屏幕 | 铭文」，
+     同一圈金属衬圈把三块一起包住，铭文落在边框里面 */
+  .glass[data-mode='focus'] .glass__bay {
+    grid-template-columns: auto auto auto;
+    grid-template-areas: 'left screen right';
+    column-gap: clamp(5px, 1.2cqh, 10px);
+  }
+
+  .glass[data-mode='focus'] .glass__bay-inner {
+    grid-area: screen;
+  }
+
+  /* 只留铭牌在屏幕上方，横屏改由两侧竖排接手 */
+  .glass[data-mode='focus'] .glass__plate {
+    display: none;
+  }
+}
+
+/* ≤520 的横屏两边被方向键和 A/B 占满，竖排铭文塞不进边框里，
+   只留屏幕，不硬挤两行字 */
+@media (orientation: landscape) and (max-height: 620px) and (min-width: 521px) {
+  .glass[data-mode='focus'] .glass__sides {
+    display: contents;
+  }
+
+  .glass[data-mode='focus'] .side {
+    display: flex;
+    flex-direction: row;
+    gap: 2.2cqh;
+    writing-mode: vertical-rl;
+    white-space: nowrap;
+  }
+
+  /* 与屏幕之间那一条竖线，和 plate 的横线同色：同一块丝印的另一个方向 */
+  .glass[data-mode='focus'] .side--left {
+    grid-area: left;
+    padding-right: clamp(5px, 1.2cqh, 10px);
+    border-right: 1px solid rgba(var(--tint), 0.16);
+  }
+
+  .glass[data-mode='focus'] .side--right {
+    grid-area: right;
+    padding-left: clamp(5px, 1.2cqh, 10px);
+    border-left: 1px solid rgba(var(--tint), 0.16);
+  }
+
+  .glass[data-mode='focus'] .side .plate__game {
+    flex-shrink: 0;
   }
 }
 

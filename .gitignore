@@ -4,3 +4,7 @@ public/mgba
 .DS_Store
 playwright-output
 .playwright-cli
+
+# 预置游戏目录：本地调试素材，不入库、不随产物分发
+# dev 下放进来的 ROM 会出现在「游戏」面板里，构建默认也不打包（GAMES=1 才带）
+games/

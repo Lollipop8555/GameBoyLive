@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { effectiveFilter, settings, session, type FilterId } from '../app/store'
+import { effectiveFilter, setDisplayMode, settings, session, type FilterId } from '../app/store'
 
 defineProps<{ paused: boolean; active: boolean }>()
-const emit = defineEmits<{ pause: []; open: []; keys: []; saves: []; exit: [] }>()
+const emit = defineEmits<{ pause: []; open: []; library: []; keys: []; saves: []; settings: []; exit: [] }>()
 
 const FILTERS: { id: FilterId; name: string }[] = [
   { id: 'auto', name: '自动' },
@@ -54,8 +54,8 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocPointer))
       </button>
 
       <div class="seg" role="group" aria-label="显示模式">
-        <button :aria-pressed="settings.displayMode === 'full'" @click="settings.displayMode = 'full'">整机</button>
-        <button :aria-pressed="settings.displayMode === 'focus'" @click="settings.displayMode = 'focus'">面板</button>
+        <button :aria-pressed="settings.displayMode === 'full'" @click="setDisplayMode('full')">整机</button>
+        <button :aria-pressed="settings.displayMode === 'focus'" @click="setDisplayMode('focus')">面板</button>
       </div>
 
       <button class="tb" @click="cycleFilter">滤镜 {{ filterName }}</button>
@@ -77,6 +77,8 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocPointer))
         存档
       </button>
       <button class="tb" title="自定义键位" @click="pick(() => emit('keys'))">键位</button>
+      <button class="tb" title="显示 / 按键 / 声音" @click="pick(() => emit('settings'))">设置</button>
+      <button class="tb" title="预置游戏与最近打开" @click="pick(() => emit('library'))">游戏</button>
       <button class="tb" @click="pick(() => emit('open'))">{{ active ? '更换 ROM' : '打开 ROM' }}</button>
       <button class="tb" :disabled="!active" @click="pick(() => emit('exit'))">退出</button>
 
@@ -230,6 +232,11 @@ button[aria-pressed='true'] {
     gap: 2px;
     min-width: 176px;
     padding: 6px;
+    /* 矮屏（横屏手机）里这列按钮比视口还高，按到视口底部就截止、
+       在菜单内部滚动，最下面的「退出」也点得到 */
+    max-height: calc(100dvh - var(--chrome-h) - 10px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
     border: 1px solid var(--line-soft);
     border-radius: 10px;
     background: linear-gradient(180deg, rgba(28, 32, 39, 0.98), rgba(14, 16, 21, 0.99));
