@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { EmulatorAdapter } from '../core/EmulatorAdapter'
-import { checkEnvironment, describeError } from '../core/errors'
+import { CacheMissError, DownloadError, checkEnvironment, describeError } from '../core/errors'
 import { gameUrl, type GameEntry } from '../core/GameCatalog'
 import { toEngineInput } from '../core/InputManager'
 import { readRom } from '../core/romInfo'
 import { readRomData, saveRom } from '../core/RomLibrary'
 import { download, downloadBlob, readSram, safeFileName, writeSram } from '../core/StorageService'
+import { t } from '../i18n'
 import type { RomInfo } from '../core/types'
 import { acquireWakeLock, releaseWakeLock } from '../core/WakeLock'
 import Dropzone from '../ui/Dropzone.vue'
@@ -69,7 +70,7 @@ async function bootEngine(bytes: Uint8Array, info: RomInfo) {
   const next = new EmulatorAdapter()
   adapter.value = next
 
-  if (!canvasEl.value) throw new Error('画布尚未挂载')
+  if (!canvasEl.value) throw new Error(t('error.canvasMissing'))
   frameTick = 0
   session.loadNote = ''
 
@@ -106,7 +107,7 @@ async function openFile(file: File) {
   session.phase = 'loading'
   session.error = ''
   session.errorHint = ''
-  session.loadNote = '读取 ROM…'
+  session.loadNote = t('app.readingRom')
 
   try {
     const { bytes, info } = await readRom(file)
@@ -127,11 +128,11 @@ async function openBundled(game: GameEntry) {
   session.phase = 'loading'
   session.error = ''
   session.errorHint = ''
-  session.loadNote = `正在下载 ${game.title}…`
+  session.loadNote = t('app.downloading', { title: game.title })
 
   try {
     const response = await fetch(gameUrl(game.file))
-    if (!response.ok) throw new Error(`下载 ${game.title} 失败（HTTP ${response.status}）`)
+    if (!response.ok) throw new DownloadError(game.title, response.status)
     const blob = await response.blob()
     await openFile(new File([blob], game.file))
   } catch (error) {
@@ -146,7 +147,7 @@ async function loadFromLibrary(id: string) {
   ui.libraryOpen = false
   try {
     const hit = await readRomData(id)
-    if (!hit) throw new Error('本地缓存里找不到这个 ROM，请重新选择文件')
+    if (!hit) throw new CacheMissError()
     await openFile(new File([hit.bytes.slice()], hit.record.name))
   } catch (error) {
     fail(error)
@@ -178,16 +179,20 @@ function togglePause() {
 /** 因切到后台才暂停的标记：回来只恢复这一种，用户自己按的暂停不动 */
 let pausedByHidden = false
 
+/** 看不见就别跑：暂停 + 放掉常亮。真的停下来了才返回 true。 */
+function pauseForBackground(): boolean {
+  releaseWakeLock()
+  const engine = adapter.value
+  if (!engine || session.phase !== 'playing' || paused.value) return false
+  engine.pause()
+  paused.value = true
+  session.phase = 'paused'
+  return true
+}
+
 function onVisibility() {
   if (document.hidden) {
-    // 看不见的画面还在跑，只会白烧 CPU 和电
-    releaseWakeLock()
-    const engine = adapter.value
-    if (!engine || session.phase !== 'playing' || paused.value) return
-    engine.pause()
-    paused.value = true
-    session.phase = 'paused'
-    pausedByHidden = true
+    if (pauseForBackground()) pausedByHidden = true
     return
   }
 
@@ -202,6 +207,14 @@ function onVisibility() {
     }
   }
   if (session.phase === 'playing') void acquireWakeLock()
+}
+
+/**
+ * 移动端切走 App 不一定先发 visibilitychange：进程可能直接被回收。
+ * pagehide 时也叫停内核，`pause()` 会把卡带存档写盘，尽量少丢最后那一段进度。
+ */
+function onPageHide() {
+  if (pauseForBackground()) pausedByHidden = true
 }
 
 function exitToIdle() {
@@ -227,7 +240,7 @@ function exitToIdle() {
 /** 存档面板要的两样东西：状态字节 + 当前帧缩略图。 */
 async function captureState() {
   const engine = adapter.value
-  if (!engine) throw new Error('内核还没启动')
+  if (!engine) throw new Error(t('error.noEngine'))
   const bytes = await engine.saveState()
   // 缩略图只是好看，截不到不影响存档本身
   const shot = await engine.screenshot().catch(() => null)
@@ -236,25 +249,25 @@ async function captureState() {
 
 async function restoreState(bytes: Uint8Array) {
   const engine = adapter.value
-  if (!engine) throw new Error('内核还没启动')
+  if (!engine) throw new Error(t('error.noEngine'))
   // 读档发生在存档面板里，面板期间保持暂停，关面板时统一恢复
   await engine.loadState(bytes)
 }
 
 async function exportSav() {
   const rom = session.rom
-  if (!rom) throw new Error('还没载入 ROM')
+  if (!rom) throw new Error(t('error.noRom'))
   const sram = await readSram(rom.id)
-  if (!sram) throw new Error('这个 ROM 还没有卡带存档，可能不支持电池存档')
+  if (!sram) throw new Error(t('error.noSram'))
   download(`${safeFileName(rom.title || rom.name)}.sav`, sram)
 }
 
 /** 截图存 PNG：文件名带卡带标题和本地时间，落到相册/下载目录里好认。 */
 async function capturePng() {
   const engine = adapter.value
-  if (!engine) throw new Error('内核还没启动')
+  if (!engine) throw new Error(t('error.noEngine'))
   const shot = await engine.screenshot()
-  if (!shot) throw new Error('这一帧没截到，等画面动一下再试')
+  if (!shot) throw new Error(t('error.noShot'))
   const rom = session.rom
   const stamp = new Date()
     .toLocaleString('sv-SE')
@@ -265,7 +278,7 @@ async function capturePng() {
 async function importSav(file: File) {
   const rom = session.rom
   const original = romBytes.value
-  if (!rom || !original) throw new Error('还没载入 ROM')
+  if (!rom || !original) throw new Error(t('error.noRom'))
   const data = new Uint8Array(await file.arrayBuffer())
   // 内核启动时就读取 SRAM，所以覆盖后必须整机重启才生效
   await writeSram(rom.id, data)
@@ -420,6 +433,8 @@ onMounted(() => {
   window.addEventListener('resize', followViewport)
   // 切走标签页：暂停并放掉常亮；切回来按需恢复
   document.addEventListener('visibilitychange', onVisibility)
+  // 页面被回收/前进后退前也叫停一次，让卡带存档落盘
+  window.addEventListener('pagehide', onPageHide)
   // 存档安全：让浏览器承诺不清理本站存储（被拒也没关系，只会少一层保护）
   void askDurableStorage()
 })
@@ -433,6 +448,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('drop', onDrop)
   window.removeEventListener('resize', followViewport)
   document.removeEventListener('visibilitychange', onVisibility)
+  window.removeEventListener('pagehide', onPageHide)
   releaseWakeLock()
   adapter.value?.destroy()
 })
@@ -482,8 +498,11 @@ onBeforeUnmount(() => {
     <!-- 游戏信息刻在机身铭牌上，这条只留操作提示；面板模式下没有提示就整条收起 -->
     <footer class="hintbar">
       <template v-if="mode !== 'focus'">
-        <span v-if="!session.rom">拖入 .gba / .gb / .gbc / .zip</span>
-        <span class="dim">键下标注为当前键位 · <kbd>`</kbd> 面板 · <kbd>Esc</kbd> 暂停</span>
+        <span v-if="!session.rom">{{ t('app.dropHint') }}</span>
+        <span class="dim">
+          {{ t('app.hintBadges') }} · <kbd>`</kbd> {{ t('app.hintPanel') }} · <kbd>Esc</kbd>
+          {{ t('app.hintPause') }}
+        </span>
       </template>
     </footer>
 

@@ -10,7 +10,27 @@ const GB_LOGO = [
 const GBA_FIXED_BYTE = 0x96
 const MAX_ROM_SIZE = 32 * 1024 * 1024
 
-export class RomError extends Error {}
+export type RomErrorCode =
+  | 'tiny'
+  | 'too-big'
+  | 'zip-broken'
+  | 'zip-empty'
+  | 'zip-method'
+  | 'zip-unsupported'
+
+/**
+ * ROM 层面的失败。`code` 是给 UI 的分类依据（文案在词典里），
+ * `detail` 只用于 zip 压缩方式这类要报数字的场合。
+ */
+export class RomError extends Error {
+  constructor(
+    readonly code: RomErrorCode,
+    readonly detail?: number,
+  ) {
+    super(detail === undefined ? code : `${code}:${detail}`)
+    this.name = 'RomError'
+  }
+}
 
 function ascii(bytes: Uint8Array, start: number, length: number): string {
   let out = ''
@@ -34,7 +54,7 @@ async function sha1(bytes: Uint8Array): Promise<string> {
 
 /** 从卡带头判定机型与核心。前端不做完整性校验，交给内核。 */
 export function detectModel(bytes: Uint8Array): { system: System; model: Model; title: string } {
-  if (bytes.length < 0x150) throw new RomError('文件太小，不是有效的 ROM')
+  if (bytes.length < 0x150) throw new RomError('tiny')
 
   if (bytes[0xb2] === GBA_FIXED_BYTE) {
     return { system: 'gba', model: 'agb', title: ascii(bytes, 0xa0, 12) }
@@ -67,7 +87,7 @@ export async function unzipSingleRom(bytes: Uint8Array): Promise<{ bytes: Uint8A
       break
     }
   }
-  if (eocd < 0) throw new RomError('zip 结构损坏（找不到中央目录）')
+  if (eocd < 0) throw new RomError('zip-broken')
 
   const count = view.getUint16(eocd + 10, true)
   let cursor = view.getUint32(eocd + 16, true)
@@ -90,16 +110,18 @@ export async function unzipSingleRom(bytes: Uint8Array): Promise<{ bytes: Uint8A
 
       if (method === 0) return { bytes: data.slice(), name }
       if (method === 8) {
+        // 老浏览器没有 DecompressionStream：明确说「解不了」，别让它变成看不懂的 TypeError
+        if (typeof DecompressionStream === 'undefined') throw new RomError('zip-unsupported')
         const stream = new Blob([data.slice()]).stream().pipeThrough(new DecompressionStream('deflate-raw'))
         return { bytes: new Uint8Array(await new Response(stream).arrayBuffer()), name }
       }
-      throw new RomError(`不支持 zip 压缩方式 ${method}`)
+      throw new RomError('zip-method', method)
     }
 
     cursor += 46 + nameLength + extraLength + commentLength
   }
 
-  throw new RomError('zip 里没有 .gba / .gb / .gbc 文件')
+  throw new RomError('zip-empty')
 }
 
 /** 脱掉 zip 外壳并嗅探头部，得到可交给内核的字节与机型信息。 */
@@ -113,8 +135,8 @@ export async function readRom(file: File): Promise<{ bytes: Uint8Array; info: Ro
     name = unzipped.name
   }
 
-  if (bytes.length > MAX_ROM_SIZE) throw new RomError('ROM 超过 32 MB，可能是误传的镜像文件')
-  if (bytes.length < 0x150) throw new RomError('文件太小，不是有效的 ROM')
+  if (bytes.length > MAX_ROM_SIZE) throw new RomError('too-big')
+  if (bytes.length < 0x150) throw new RomError('tiny')
 
   const detected = detectModel(bytes)
   return {

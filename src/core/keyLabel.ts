@@ -1,17 +1,21 @@
+import { t, type MessageKey } from '../i18n'
 import type { KeyAction } from './types'
 
-/** 动作的中文名（设置面板与无障碍标签共用）。 */
-export const ACTION_LABEL: Record<KeyAction, string> = {
-  up: '上',
-  down: '下',
-  left: '左',
-  right: '右',
-  a: 'A',
-  b: 'B',
-  l: 'L',
-  r: 'R',
-  start: 'Start',
-  select: 'Select',
+/** 只有方向键需要翻译；A/B/L/R/Start/Select 是机身刻字，任何语言下都长这样。 */
+const DIRECTION: Partial<Record<KeyAction, MessageKey>> = {
+  up: 'action.up',
+  down: 'action.down',
+  left: 'action.left',
+  right: 'action.right',
+}
+
+const CAPITALIZED: ReadonlySet<KeyAction> = new Set(['start', 'select'])
+
+/** 动作的显示名（设置面板与无障碍标签共用）。按当前语言现取，切语言立刻跟着变。 */
+export function actionLabel(action: KeyAction): string {
+  const key = DIRECTION[action]
+  if (key) return t(key)
+  return CAPITALIZED.has(action) ? action[0]!.toUpperCase() + action.slice(1) : action.toUpperCase()
 }
 
 const ARROWS: Record<string, string> = {
@@ -22,7 +26,6 @@ const ARROWS: Record<string, string> = {
 }
 
 const ODD: Record<string, string> = {
-  Space: '空格',
   Enter: '↵',
   Escape: 'Esc',
   Backquote: '`',
@@ -57,6 +60,7 @@ export function formatKeyLabel(code: string | null | undefined): string {
   if (!code) return '—'
   if (ARROWS[code]) return ARROWS[code]!
   if (ODD[code]) return ODD[code]!
+  if (code === 'Space') return t('key.space')
 
   const letter = /^Key([A-Z])$/.exec(code)
   if (letter) return letter[1]!
@@ -65,7 +69,7 @@ export function formatKeyLabel(code: string | null | undefined): string {
   if (digit) return digit[1]!
 
   const numpad = /^Numpad(\d)$/.exec(code)
-  if (numpad) return `小键盘${numpad[1]}`
+  if (numpad) return t('key.num', { n: numpad[1]! })
 
   const fn = /^F(\d{1,2})$/.exec(code)
   if (fn) return `F${fn[1]}`

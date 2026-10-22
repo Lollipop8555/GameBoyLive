@@ -24,11 +24,6 @@ let sentinel: Sentinel | null = null
 /** 正在申请中的那一次：并发的 acquire（比如恢复与 watcher 同时触发）不该申请两回 */
 let pending: Promise<void> | null = null
 
-/** 能不能用：Safari 16.4 之前、非 https 环境都没有这个 API。 */
-export function wakeLockSupported(): boolean {
-  return Boolean(api())
-}
-
 /** 申请常亮。重复调用是幂等的；失败（低电量模式、系统策略）静默放弃。 */
 export function acquireWakeLock(): Promise<void> {
   const wakeLock = api()

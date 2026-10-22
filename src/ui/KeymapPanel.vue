@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { DEFAULT_KEYMAP, actionsFor } from '../core/InputManager'
-import { ACTION_LABEL, formatKeyLabel } from '../core/keyLabel'
+import { actionLabel, formatKeyLabel } from '../core/keyLabel'
 import type { KeyAction } from '../core/types'
 import { settings, session } from '../app/store'
+import { t } from '../i18n'
 
 const emit = defineEmits<{ close: [] }>()
 
@@ -29,7 +30,7 @@ function bind(code: string) {
   if (holder) {
     // 一个键不能挂两个动作，撞上了就交换，用户不用手动解绑
     settings.keymap[holder] = previous
-    notice.value = `${formatKeyLabel(code)} 原本是「${ACTION_LABEL[holder]}」，已互换`
+    notice.value = t('keymap.swapped', { key: formatKeyLabel(code), action: actionLabel(holder) })
   } else {
     notice.value = ''
   }
@@ -47,7 +48,7 @@ function clear(action: KeyAction) {
 function resetAll() {
   Object.assign(settings.keymap, DEFAULT_KEYMAP)
   capturing.value = null
-  notice.value = '已恢复默认键位'
+  notice.value = t('keymap.resetDone')
 }
 
 function onKey(event: KeyboardEvent) {
@@ -82,27 +83,27 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey, true))
   <div class="scrim" @click.self="emit('close')">
     <section class="keymap" role="dialog" aria-modal="true" aria-labelledby="keymap-title">
       <header class="keymap__head">
-        <h2 id="keymap-title">键位</h2>
-        <span class="keymap__hint">点一下键位，再按新键</span>
-        <button class="x" aria-label="关闭" @click="emit('close')">✕</button>
+        <h2 id="keymap-title">{{ t('keymap.title') }}</h2>
+        <span class="keymap__hint">{{ t('keymap.hint') }}</span>
+        <button class="x" :aria-label="t('common.close')" @click="emit('close')">✕</button>
       </header>
 
       <ul class="rows">
         <li v-for="action in actions" :key="action" :class="{ active: capturing === action }">
-          <span class="name">{{ ACTION_LABEL[action] }}</span>
+          <span class="name">{{ actionLabel(action) }}</span>
           <button
             class="key"
             :class="{ empty: !settings.keymap[action], waiting: capturing === action }"
             @click="begin(action)"
           >
-            {{ capturing === action ? '按下新键…' : formatKeyLabel(settings.keymap[action]) }}
+            {{ capturing === action ? t('keymap.waiting') : formatKeyLabel(settings.keymap[action]) }}
           </button>
         </li>
       </ul>
 
       <footer class="keymap__foot">
-        <span class="notice">{{ notice || 'Esc 取消 · Backspace 清除' }}</span>
-        <button class="ghost" @click="resetAll">恢复默认</button>
+        <span class="notice">{{ notice || t('keymap.footHint') }}</span>
+        <button class="ghost" @click="resetAll">{{ t('keymap.reset') }}</button>
       </footer>
     </section>
   </div>

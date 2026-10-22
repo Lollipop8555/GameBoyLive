@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { settings, session } from '../app/store'
+import { t } from '../i18n'
 import { SHELLS } from './shells/geometry'
 
 const emit = defineEmits<{ ready: [canvas: HTMLCanvasElement]; pick: []; resume: [] }>()
@@ -55,8 +56,8 @@ defineExpose({ canvas: canvasEl })
       v-if="paused"
       class="screen__resume"
       type="button"
-      aria-label="继续游戏"
-      title="继续游戏"
+      :aria-label="t('screen.resume')"
+      :title="t('screen.resume')"
       @click="emit('resume')"
     />
 
@@ -66,7 +67,7 @@ defineExpose({ canvas: canvasEl })
       :class="{ 'boot--error': failed, 'boot--loading': loading }"
       role="button"
       tabindex="0"
-      :aria-label="failed ? '重新选择 ROM' : '选择 ROM'"
+      :aria-label="failed ? t('screen.chooseAnother') : t('screen.chooseRom')"
       @click="pick"
       @keydown.enter.prevent="pick"
       @keydown.space.prevent="pick"
@@ -76,18 +77,20 @@ defineExpose({ canvas: canvasEl })
       <template v-if="failed">
         <p class="boot__error">{{ session.error }}</p>
         <p v-if="session.errorHint" class="boot__hint">{{ session.errorHint }}</p>
-        <span class="boot__cta">重新选择 ROM</span>
+        <span class="boot__cta">{{ t('screen.chooseAnother') }}</span>
       </template>
 
       <template v-else-if="loading">
-        <p class="boot__tip">{{ session.loadNote || '内核加载中…' }}</p>
+        <p class="boot__tip">{{ session.loadNote || t('screen.loadingCore') }}</p>
         <span class="boot__bar" aria-hidden="true"><i /></span>
-        <p class="boot__hint">{{ session.loadNote ? '文件只在本机读取，不会上传' : '首次进入需下载约 790 KB 内核' }}</p>
+        <p class="boot__hint">
+          {{ session.loadNote ? t('screen.localOnly') : t('screen.firstLoad') }}
+        </p>
       </template>
 
       <template v-else>
-        <p class="boot__tip">拖入 ROM 或点击选择</p>
-        <span class="boot__cta">选择 ROM</span>
+        <p class="boot__tip">{{ t('screen.dropHint') }}</p>
+        <span class="boot__cta">{{ t('screen.chooseRom') }}</span>
       </template>
     </div>
   </div>

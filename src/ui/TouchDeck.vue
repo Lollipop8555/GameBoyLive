@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive } from 'vue'
 import { touchCode } from '../core/InputManager'
-import { formatKeyLabel } from '../core/keyLabel'
+import { actionLabel, formatKeyLabel } from '../core/keyLabel'
 import type { KeyAction } from '../core/types'
 import { session, settings } from '../app/store'
 
@@ -33,10 +33,10 @@ function actionsOf(sys: string): KeyAction[] {
 
 /** 四个方向各自带箭头字形，键位字符就刻在自己那一格里，WASD 也能一眼对上 */
 const DIRECTIONS = [
-  { action: 'up', arrow: '↑', label: '上', path: 'M12 7l6 7H6z' },
-  { action: 'left', arrow: '←', label: '左', path: 'M7 12l7-6v12z' },
-  { action: 'right', arrow: '→', label: '右', path: 'M17 12l-7 6V6z' },
-  { action: 'down', arrow: '↓', label: '下', path: 'M12 17l-6-7h12z' },
+  { action: 'up', arrow: '↑', path: 'M12 7l6 7H6z' },
+  { action: 'left', arrow: '←', path: 'M7 12l7-6v12z' },
+  { action: 'right', arrow: '→', path: 'M17 12l-7 6V6z' },
+  { action: 'down', arrow: '↓', path: 'M12 17l-6-7h12z' },
 ] as const
 
 function fire(action: KeyAction, down: boolean) {
@@ -140,7 +140,7 @@ const bind = (action: KeyAction) => ({
             class="dpad__key"
             :class="[`dpad__key--${dir.action}`, { on: isOn(dir.action) }]"
             v-bind="bind(dir.action)"
-            :aria-label="dir.label"
+            :aria-label="actionLabel(dir.action)"
           >
             <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="dir.path" /></svg>
             <span class="key__cap" :class="{ 'key__cap--same': caps[dir.action] === dir.arrow }">

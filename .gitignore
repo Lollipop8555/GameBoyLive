@@ -1,6 +1,5 @@
 node_modules
 dist
-public/mgba
 .DS_Store
 playwright-output
 .playwright-cli

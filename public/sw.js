@@ -7,9 +7,16 @@
  */
 const VERSION = 'gbl-v1'
 const SCOPE = new URL('./', self.location).href
-const SHELL = ['./', './index.html', './favicon.svg', './manifest.webmanifest', './icons/icon.svg'].map(
-  (path) => new URL(path, self.location).href,
-)
+const SHELL = [
+  './',
+  './index.html',
+  './favicon.svg',
+  './manifest.webmanifest',
+  './icons/icon-192.png',
+  './icons/icon-512.png',
+  './icons/maskable-512.png',
+  './icons/apple-touch-icon.png',
+].map((path) => new URL(path, self.location).href)
 /** 卡带与压缩包：能在线玩，但不进缓存 */
 const ROM_LIKE = /\.(gb|gbc|gba|sgb|zip)$/i
 
@@ -38,6 +45,35 @@ self.addEventListener('activate', (event) => {
   )
 })
 
+/**
+ * 记住最新那版页面，并顺手把上一版带指纹的资源剔掉：
+ * 资源名每次构建都变，不清就一次发版在用户磁盘上多留一份旧 js/css。
+ */
+async function rememberShell(response) {
+  try {
+    const html = await response.text()
+    const cache = await caches.open(VERSION)
+    await cache.put(
+      SCOPE,
+      new Response(html, { headers: { 'content-type': 'text/html; charset=utf-8' } }),
+    )
+
+    const keep = new Set()
+    for (const match of html.matchAll(/(?:src|href)="([^"]+)"/g)) {
+      keep.add(new URL(match[1], SCOPE).href)
+    }
+    for (const key of await cache.keys()) {
+      const url = new URL(key.url)
+      // 只动 /assets/ 下的构建产物：图标、wasm 用固定文件名，一律留下
+      if (!url.pathname.includes('/assets/')) continue
+      if (keep.has(url.href)) continue
+      await cache.delete(key)
+    }
+  } catch {
+    /* 缓存维护失败不该影响这次导航 */
+  }
+}
+
 self.addEventListener('fetch', (event) => {
   const request = event.request
   if (request.method !== 'GET') return
@@ -52,10 +88,7 @@ self.addEventListener('fetch', (event) => {
       (async () => {
         try {
           const fresh = await fetch(request)
-          if (fresh.ok) {
-            const cache = await caches.open(VERSION)
-            void cache.put(SCOPE, fresh.clone())
-          }
+          if (fresh.ok) void rememberShell(fresh.clone())
           return fresh
         } catch {
           const cache = await caches.open(VERSION)

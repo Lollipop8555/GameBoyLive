@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Phase } from '../../app/store'
+import { t, type MessageKey } from '../../i18n'
 import type { Model } from '../../core/types'
 
 /**
@@ -30,12 +31,12 @@ const NAMES: Record<Model, { head: string; foot: string; code: string; lcd: stri
 
 /** 灯旁边的丝印是**状态读数**，不是下一步的动作：正在跑就是 RUN，
     被按住就是 HOLD。点击会做什么写在 title / aria-label 里 */
-const POWER: Record<Phase, { text: string; aria: string }> = {
-  idle: { text: 'OFF', aria: '未载入卡带' },
-  loading: { text: 'LOAD', aria: '内核载入中' },
-  playing: { text: 'RUN', aria: '运行中，点击暂停' },
-  paused: { text: 'HOLD', aria: '已暂停，点击继续' },
-  error: { text: 'ERR', aria: '内核出错' },
+const POWER: Record<Phase, { text: string; aria: MessageKey }> = {
+  idle: { text: 'OFF', aria: 'power.idle' },
+  loading: { text: 'LOAD', aria: 'power.loading' },
+  playing: { text: 'RUN', aria: 'power.playing' },
+  paused: { text: 'HOLD', aria: 'power.paused' },
+  error: { text: 'ERR', aria: 'power.error' },
 }
 
 const name = computed(() => NAMES[props.model])
@@ -44,7 +45,10 @@ const key = computed(() => (props.model === 'agb' ? 'agb' : 'gb'))
 const cart = computed(() => props.title?.trim() || '')
 /** 帧率是参数行的一部分，和 `240 × 160` 同一个字阶，不另做 HUD */
 const fpsText = computed(() => (props.fps && props.fps > 0 ? `${Math.round(props.fps)} FPS` : ''))
-const power = computed(() => POWER[props.phase] ?? POWER.idle)
+const power = computed(() => {
+  const item = POWER[props.phase] ?? POWER.idle
+  return { text: item.text, aria: t(item.aria) }
+})
 /** 没有内核可暂停时这颗键只是状态灯，别让它看起来能按 */
 const powerIdle = computed(() => props.phase !== 'playing' && props.phase !== 'paused')
 </script>

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { t } from '../i18n'
+
 defineProps<{ active: boolean }>()
 </script>
 
@@ -6,7 +8,7 @@ defineProps<{ active: boolean }>()
   <div class="dropzone" :class="{ active }" aria-hidden="true">
     <div class="dropzone__card">
       <span class="dropzone__icon">＋</span>
-      <p>松手即载入</p>
+      <p>{{ t('drop.release') }}</p>
       <span class="dropzone__types">.gba · .gb · .gbc · .zip</span>
     </div>
   </div>

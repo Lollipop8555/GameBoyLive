@@ -102,6 +102,17 @@ engine.config.write('volume', 0.5);    // 运行期可改：volume/renderFilter/
 
 **合成事件可用（已确认）**：键盘监听只读 `e.code`，不校验 `isTrusted` —— 触屏按钮可以派发合成 `KeyboardEvent`，与键盘共用同一条输入通路。
 
+### 2.4 内核产物完全本地化（无远程依赖）
+
+项目**不引用任何 CDN 上的内核**，运行时不向第三方发请求：
+
+- 内核本体来自 `node_modules/@wasm-gaming/mgba-wasm`，由 `scripts/copy-wasm.mjs` 在 `postinstall` / `predev` / `prebuild` 三个钩子里把 `mgba.js` + `mgba.wasm` 复制到 `public/mgba/`；该目录已从 `.gitignore` 移出、**作为项目内静态资源入库**（`mgba.js` 67 KB + `mgba.wasm` 791 KB）。因此上游撤版、改版或 CI 解析到别的内容，仓库里这份产物照样可跑。
+- 脚本同时写 `public/mgba/manifest.json`（包名 + 版本 + 两个文件的 sha256）：内核字节一旦变化，构建日志会告警，`git diff` 里也看得见 —— 不会「悄悄换了内核还以为是同一个」。
+- `EmulatorAdapter` 启动时显式传 `jsUrl` / `wasmUrl`，只指向本站相对路径（`${BASE_URL}mgba/mgba.js`、`${BASE_URL}mgba/mgba.wasm`），**没有 unpkg / jsdelivr 之类的远程回退**；`dist/` 里除 Vue 自带的提示链接外搜不到任何外部 URL。
+- 上游版本在 `package.json` 里锁到 `^0.1.1`、`package-lock.json` 入库存精确解析；升级内核是一次显式的代码改动，而不是线上悄悄换版本。
+
+> 也就是说：内核是**项目内的静态资源依赖**，不是远程项目依赖。唯一的外部性是「换机器重新构建时要能从 npm 拉到同一个版本」——这一步失败会直接构建失败，不会退化成线上加载别人的文件。
+
 ---
 
 ## 3. 总体架构
@@ -146,12 +157,15 @@ GameBoyLive/
 │  ├─ favicon.svg
 │  ├─ manifest.webmanifest          # PWA 清单（可安装）
 │  ├─ sw.js                         # 外壳缓存（不做 ROM 缓存）
-│  └─ icons/                        # icon.svg / maskable.svg
+│  └─ icons/                        # icon-192/512.png、maskable-512.png、apple-touch-icon.png（+ 源 SVG）
 ├─ src/
-│  ├─ main.ts                       # createApp + 全局错误边界 + SW 注册（仅产物）
+│  ├─ main.ts                       # createApp + SW 注册（仅产物；启动失败由 App.vue 兜成 error 态）
 │  ├─ app/
 │  │  ├─ App.vue                    # 布局 + 状态机（idle/loading/playing/paused）
 │  │  └─ store.ts                   # reactive() 单例：settings + session（不引 Pinia）
+│  ├─ i18n/
+│  │  ├─ index.ts                   # locale ref + setLocale + t(key, params)，持久化 localStorage
+│  │  └─ messages.ts                # zh 定义键、en 必须逐键覆盖（漏键编译期报错）
 │  ├─ core/                         # ★ 框架无关纯 TS，禁止 import 框架 API
 │  │  ├─ types.ts                   # System/KeyAction/RomInfo/SaveSlot 等
 │  │  ├─ EmulatorAdapter.ts         # 内核唯一出入口（含 Plan B 适配点）
@@ -313,6 +327,7 @@ idle ──拖入/选择 ROM──► loading ──ready──► playing ⇄ p
 - `loading` 覆盖层显示内核下载/初始化进度（wasm 首次 ~790 KB）。
 - 首次 `AudioContext` 必须在用户手势内 `resume()`，否则 `AudioContext` 会挂起 → 提供「点击开始」遮罩。
 - **切到后台**：`visibilitychange` 隐藏时暂停并放掉常亮——看不见的画面继续跑只是白烧 CPU 和电；回到前台只恢复「因隐藏而暂停」的那一次，用户手动按下的暂停不替他恢复（存档面板开着时也不恢复）。
+- **进程被回收前的兜底**：`pagehide` 也走同一条暂停路径（移动端切走 App 不一定先发 `visibilitychange`）。`pause()` 会把卡带存档写盘，尽量少丢最后那几十秒进度。
 - **屏幕常亮**：`playing` 时持有 Screen Wake Lock，`paused` / `idle` / `error` / 卸载即释放；并发申请会合并成一次。不支持（Safari < 16.4、非安全上下文）或被系统拒绝时静默跳过，不影响游戏。
 
 ---
@@ -325,9 +340,18 @@ idle ──拖入/选择 ROM──► loading ──ready──► playing ⇄ p
 - **两种显示模式**：`完整`（整壳 + 按键旁键位徽章，上手期）/ `特写`（只剩上盖屏幕，沉浸期），详见 §4.3.1。工具栏按钮一键切换，状态持久化。
 - **暂停遮罩**：4 个存档槽（缩略图 + 相对时间 + 覆盖确认）、导出/导入存档、截图、退出到首屏。
 - **画面圆角遮罩（可选，默认关）**：开启时衬圈厚度 + 画面圆角 = 窗口外圆角（`--bay-pad + --screen-radius`），三者只有一个来源，内外两条弧线共圆心、平行；画布用 `position: absolute; inset: 0` 钉死在格子里，弧线同时画在格子和画布两处（`border-radius` + `clip-path`）。**已知限制**：画布（尤其 WebGL 合成层）上的圆角裁切在部分浏览器里会被忽略，开了也可能仍是直角，所以不设成默认外观，设置页里也直说了。
-- **设置面板**：`显示`（显示模式、键位徽章开关、滤镜、像素锐化、圆角遮罩、触控层透明度）| `按键`（键位表 + 恢复默认）| `声音`（音量/静音）| `关于`（内核版本、许可、无 ROM 声明、存档保护状态）。
+- **设置面板**：`显示`（显示模式、语言、键位徽章开关、滤镜、像素锐化、圆角遮罩、触控层透明度）| `按键`（键位表 + 恢复默认）| `声音`（音量/静音）| `关于`（内核版本、许可、无 ROM 声明、存档保护状态）。
+- **界面语言（中 / EN）**：两处入口 —— 菜单面板**顶部**的 `中 | EN` 切换（横屏矮视口里菜单要滚动，所以不放末尾），以及 `设置 → 显示 → 语言`。切换即时生效、写入 `localStorage['gbl.locale.v1']`、刷新保持，同时同步 `<html lang>`。实现见 §5.1。
 - **空/异常态**：无 ROM、坏 ROM、超过 32 MB、wasm 加载失败、浏览器不支持 —— 屏幕内直接说明原因并给出下一步动作（点整块屏幕即可重选）。
 - **可访问性**：所有外壳按钮带 `role="button"` + `aria-label` + 键盘可达（`Tab` + `Space/Enter`）；对比度 ≥ 4.5:1。
+
+### 5.1 国际化（自研 60 行，不引 vue-i18n）
+
+- `src/i18n/messages.ts`：`zh` 对象是**唯一键定义处**，`MessageKey = keyof typeof zh`；`en` 声明为 `Record<MessageKey, string>`，所以**漏翻一个键就编译不过**（`vue-tsc` 直接拦下），不会出现运行时回退到中文或显示 key 的情况。
+- `src/i18n/index.ts`：`locale` 是 `ref<Locale>`，`setLocale()` 写 `localStorage['gbl.locale.v1']` 并同步 `document.documentElement.lang`；`t(key, params?)` 支持 `{n}` / `{name}` 占位符插值。默认 `zh-CN`。
+- 不引入框架的理由：文案量 ~200 键、无复数/日期库需求，`vue-i18n` 的 bundle 与配置成本大于收益；日期格式化直接用 `toLocaleDateString(locale)`，跟随同一个开关。
+- **刻意不翻译**：ROM 文件名/卡带内部标题（用户数据）、机身丝印与按键刻字（`GAME BOY`、`OFF/LOAD/RUN/HOLD/ERR`，那是硬件外观，不是界面文案）。
+- 错误信息走「稳定 code + 词典查表」：`RomError` 携带 `RomErrorCode`（`tiny`/`too-big`/`zip-broken`/…），UI 侧 `t(\`error.rom.${code}\`)`；切换语言时**已经显示在屏幕上的错误也会跟着变**，不会残留上一个语言。
 
 ---
 
@@ -372,7 +396,7 @@ jobs:
 - `vite.config.ts`：`base: './'`（用户页与项目页通用）、`build.assetsInlineLimit: 0`、`assetsInclude: ['**/*.wasm']`。
 - `public/.nojekyll` 必须存在。
 - **不需要** COOP/COEP 响应头（这正是选 `@wasm-gaming/mgba-wasm` 的核心原因）；`.wasm` 由 GitHub Pages 以 `application/wasm` 正确返回。
-- **PWA**：`public/manifest.webmanifest` + `public/sw.js`。SW 只在产物里注册（`import.meta.env.PROD`），dev 下不注册以免缓存搅乱热更新；注册用相对路径 `new URL('sw.js', document.baseURI)`，`base: './'` 部署到项目页子路径时 scope 仍落在 `/<repo>/`。缓存策略：导航请求网络优先（重新部署立刻生效）、静态资源缓存优先；`*.gb|gbc|gba|zip` 明确不进缓存。
+- **PWA**：`public/manifest.webmanifest` + `public/sw.js`。SW 只在产物里注册（`import.meta.env.PROD`），dev 下不注册以免缓存搅乱热更新；注册用相对路径 `new URL('sw.js', document.baseURI)`，`base: './'` 部署到项目页子路径时 scope 仍落在 `/<repo>/`。缓存策略：导航请求网络优先（重新部署立刻生效）、静态资源缓存优先；`*.gb|gbc|gba|zip` 明确不进缓存。每次导航拿到新页面后按其中的 `src`/`href` 清掉 `/assets/` 下不再被引用的旧指纹资源，避免一次发版留一份旧 JS/CSS。图标为 PNG（192/512 + maskable + 180 的 `apple-touch-icon`），`icon.svg` 只作设计源文件保留——iOS 不接受 SVG 当主屏图标。
 - 本地调试：`npm run dev`（HTTPS 不需要，localhost 属安全上下文）。
 - 流水线已入库：`.github/workflows/deploy.yml`（push 到 `main` 即构建并发布），仓库需在 Settings → Pages 里把 Source 设为 GitHub Actions。
 
@@ -415,7 +439,7 @@ jobs:
 
 **M0 踩到的坑（已固化进代码，后续不要再踩）**
 
-1. **wasm 产物必须独立托管**：SDK 内部用 `new URL('./mgba.js', import.meta.url)` 定位资源，经 Vite 预打包后该路径失效。现由 `scripts/copy-wasm.mjs` 把 `mgba.js` + `mgba.wasm` 拷到 `public/mgba/`，再通过 `jsUrl` / `wasmUrl` 显式传入（`predev` / `prebuild` / `postinstall` 三个钩子都挂了）。
+1. **wasm 产物必须独立托管**：SDK 内部用 `new URL('./mgba.js', import.meta.url)` 定位资源，经 Vite 预打包后该路径失效。现由 `scripts/copy-wasm.mjs` 把 `mgba.js` + `mgba.wasm` 拷到 `public/mgba/`（已入库），再通过 `jsUrl` / `wasmUrl` 显式传入（`predev` / `prebuild` / `postinstall` 三个钩子都挂了）。
 2. **上游类型声明已漂移**：`@wasm-gaming/mgba-wasm@0.1.1` 的 `.d.ts` 从 `@wasm-gaming/engine-specs` 导入 `EngineInstance`，而该包 0.3.2 并不导出它。`skipLibCheck` 会把它降级成 `any`，所以我们在 `core/types.ts` 自定义 `MgbaEngine` 接口收口，业务层不接触 `any`。
 3. **`--mgba-aspect` 在首帧才写入**：启动瞬间 `getComputedStyle` 读到空值，需在 `frame` 回调里按节流补读。
 4. **无电池存档的 ROM 不会产生 `sram.bin`**：`cloneSram()` 在 SRAM 为 0 字节时直接跳过，属预期行为。自检文案已区分，避免把 acid2 这类测试 ROM 误判为失败。
@@ -473,7 +497,8 @@ jobs:
 | D2 | 前端栈 | **Vue 3.5 + `<script setup>` + Vite + TS**（理由见 §2.2.1）；`core/` 框架无关，决策可逆 | ✅ 已定 |
 | D3 | ROM 缓存 | 默认开启 IndexedDB 缓存（「最近游戏」），设置里可关闭 + 一键清空 | ✅ 已定 |
 | D4 | 强制换壳 / 皮肤换色 | v1 不做，v2 候选 | 默认按此执行 |
-| D5 | 界面语言 | 中文优先，文案集中管理预留 i18n | 默认按此执行 |
+| D5 | 界面语言 | 中 / EN 双语，菜单顶部与 `设置 → 显示` 可切；自研 `t()` + 编译期键校验，不引 vue-i18n | ✅ 已实现 |
+| D7 | 内核依赖形态 | 产物落地到 `public/mgba/` 并入库，运行时只走本站相对路径，**无 CDN / 无远程回退** | ✅ 已定 |
 | D6 | **双显示模式** | `完整`（整壳 + 按键旁键位徽章）/ `特写`（仅上盖屏幕，沉浸）；同一组件按 `data-mode` 切换，焦点模式在移动端自动启用浮动触控层 | ✅ 已定 |
 
 ---

@@ -7,6 +7,7 @@ import {
   readSlot,
   writeSlot,
 } from '../core/StorageService'
+import { locale, t } from '../i18n'
 
 const props = defineProps<{
   romId: string
@@ -74,47 +75,47 @@ async function run(label: string, task: () => Promise<void>) {
 
 function save(index: number) {
   const view = views.value[index - 1]
-  if (view?.filled && !window.confirm(`槽 ${index} 已有存档，覆盖吗？`)) return
-  void run('保存中…', async () => {
+  if (view?.filled && !window.confirm(t('saves.overwrite', { n: index }))) return
+  void run(t('saves.saving'), async () => {
     const { bytes, shot } = await props.capture()
     await writeSlot(props.romId, index, bytes, shot)
     await refresh()
-    notice.value = `已保存到槽 ${index}`
+    notice.value = t('saves.saved', { n: index })
   })
 }
 
 function load(index: number) {
-  void run('读取中…', async () => {
+  void run(t('saves.reading'), async () => {
     const payload = await readSlot(props.romId, index)
     if (!payload) {
-      notice.value = '这个槽是空的'
+      notice.value = t('saves.emptySlot')
       return
     }
     await props.restore(payload.bytes)
-    notice.value = `已读取槽 ${index}`
+    notice.value = t('saves.loaded', { n: index })
   })
 }
 
 function remove(index: number) {
-  if (!window.confirm(`删除槽 ${index} 的存档？`)) return
-  void run('删除中…', async () => {
+  if (!window.confirm(t('saves.removeAsk', { n: index }))) return
+  void run(t('saves.removing'), async () => {
     await clearSlot(props.romId, index)
     await refresh()
-    notice.value = `已删除槽 ${index}`
+    notice.value = t('saves.removed', { n: index })
   })
 }
 
 function exportSavNow() {
-  void run('导出中…', async () => {
+  void run(t('saves.exporting'), async () => {
     await props.exportSav()
-    notice.value = '已导出 .sav'
+    notice.value = t('saves.exported')
   })
 }
 
 function shotNow() {
-  void run('截图中…', async () => {
+  void run(t('saves.shooting'), async () => {
     await props.captureShot()
-    notice.value = '截图已保存'
+    notice.value = t('saves.shotSaved')
   })
 }
 
@@ -128,28 +129,28 @@ function onPick(event: Event) {
   const file = input.files?.[0]
   input.value = ''
   if (!file) return
-  void run('导入中…', async () => {
-    if (!window.confirm('.sav 会覆盖当前卡带存档并重启游戏，继续吗？')) return
+  void run(t('saves.importing'), async () => {
+    if (!window.confirm(t('saves.importAsk'))) return
     await props.importSav(file)
     await refresh()
-    notice.value = `已导入 ${file.name}`
+    notice.value = t('saves.imported', { name: file.name })
   })
 }
 
 function ago(at: number): string {
-  if (!at) return '未使用'
+  if (!at) return t('saves.unused')
   const minutes = Math.floor((Date.now() - at) / 60000)
-  if (minutes < 1) return '刚刚'
-  if (minutes < 60) return `${minutes} 分钟前`
+  if (minutes < 1) return t('time.justNow')
+  if (minutes < 60) return t('time.minutes', { n: minutes })
   const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours} 小时前`
+  if (hours < 24) return t('time.hours', { n: hours })
   const days = Math.floor(hours / 24)
-  if (days < 30) return `${days} 天前`
-  return new Date(at).toLocaleDateString()
+  if (days < 30) return t('time.days', { n: days })
+  return new Date(at).toLocaleDateString(locale.value === 'zh' ? 'zh-CN' : 'en')
 }
 
 onMounted(() => {
-  void run('读取中…', refresh)
+  void run(t('saves.reading'), refresh)
 })
 
 onBeforeUnmount(revokeAll)
@@ -159,37 +160,41 @@ onBeforeUnmount(revokeAll)
   <div class="scrim" @click.self="emit('close')">
     <section class="saves" role="dialog" aria-modal="true" aria-labelledby="saves-title">
       <header class="saves__head">
-        <h2 id="saves-title">存档</h2>
+        <h2 id="saves-title">{{ t('saves.title') }}</h2>
         <span class="saves__hint">{{ props.romName }}</span>
-        <button class="x" aria-label="关闭" @click="emit('close')">✕</button>
+        <button class="x" :aria-label="t('common.close')" @click="emit('close')">✕</button>
       </header>
 
       <div class="grid">
         <article v-for="view in views" :key="view.index" class="slot" :class="{ empty: !view.filled }">
           <div class="shot">
             <img v-if="view.shot" :src="view.shot" alt="" />
-            <span v-else class="shot__empty">空</span>
+            <span v-else class="shot__empty">{{ t('saves.empty') }}</span>
             <span class="badge">{{ view.index }}</span>
           </div>
 
           <p class="meta">{{ ago(view.at) }}</p>
 
           <div class="ops">
-            <button :disabled="Boolean(busy)" @click="save(view.index)">存</button>
-            <button :disabled="Boolean(busy) || !view.filled" @click="load(view.index)">读</button>
+            <button :disabled="Boolean(busy)" @click="save(view.index)">{{ t('saves.opSave') }}</button>
+            <button :disabled="Boolean(busy) || !view.filled" @click="load(view.index)">
+              {{ t('saves.opLoad') }}
+            </button>
             <button class="del" :disabled="Boolean(busy) || !view.filled" @click="remove(view.index)">
-              删
+              {{ t('saves.opDel') }}
             </button>
           </div>
         </article>
       </div>
 
       <footer class="saves__foot">
-        <span class="notice">{{ busy || notice || '即时存档只存在本机，不上传' }}</span>
+        <span class="notice">{{ busy || notice || t('saves.localOnly') }}</span>
         <div class="sav-ops">
-          <button class="ghost" :disabled="Boolean(busy)" @click="shotNow">截图 PNG</button>
-          <button class="ghost" :disabled="Boolean(busy)" @click="exportSavNow">导出 .sav</button>
-          <button class="ghost" :disabled="Boolean(busy)" @click="pickSav">导入 .sav</button>
+          <button class="ghost" :disabled="Boolean(busy)" @click="shotNow">{{ t('saves.shotBtn') }}</button>
+          <button class="ghost" :disabled="Boolean(busy)" @click="exportSavNow">
+            {{ t('saves.exportBtn') }}
+          </button>
+          <button class="ghost" :disabled="Boolean(busy)" @click="pickSav">{{ t('saves.importBtn') }}</button>
         </div>
       </footer>
 

@@ -4,6 +4,7 @@
  * 框架无关，UI 自己决定怎么展示。
  */
 import type { Model, RomInfo, System } from './types'
+import { t } from '../i18n'
 
 const DB_NAME = 'gbl-roms'
 const DB_VERSION = 1
@@ -30,7 +31,7 @@ function openDb(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise
   dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
     if (typeof indexedDB === 'undefined') {
-      reject(new Error('当前浏览器不支持本地缓存'))
+      reject(new Error(t('storage.noIndexedDb')))
       return
     }
     const request = indexedDB.open(DB_NAME, DB_VERSION)
@@ -42,7 +43,7 @@ function openDb(): Promise<IDBDatabase> {
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => {
       dbPromise = null
-      reject(request.error ?? new Error('游戏库打不开'))
+      reject(request.error ?? new Error(t('storage.libraryOpen')))
     }
   })
   return dbPromise
@@ -56,7 +57,7 @@ function readAllMeta(db: IDBDatabase): Promise<RomRecord[]> {
   return new Promise<RomRecord[]>((resolve, reject) => {
     const request = db.transaction(META, 'readonly').objectStore(META).getAll()
     request.onsuccess = () => resolve((request.result as RomRecord[]) ?? [])
-    request.onerror = () => reject(fail(request.error, '读取游戏库失败'))
+    request.onerror = () => reject(fail(request.error, t('storage.libraryRead')))
   })
 }
 
@@ -76,7 +77,7 @@ async function trim(db: IDBDatabase): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const transaction = db.transaction([META, DATA], 'readwrite')
     transaction.oncomplete = () => resolve()
-    transaction.onerror = () => reject(fail(transaction.error, '清理游戏库失败'))
+    transaction.onerror = () => reject(fail(transaction.error, t('storage.libraryTrim')))
     for (const row of stale) {
       transaction.objectStore(META).delete(row.id)
       transaction.objectStore(DATA).delete(row.id)
@@ -99,7 +100,7 @@ export async function saveRom(info: RomInfo, bytes: Uint8Array): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const transaction = db.transaction([META, DATA], 'readwrite')
     transaction.oncomplete = () => resolve()
-    transaction.onerror = () => reject(fail(transaction.error, '写入游戏库失败'))
+    transaction.onerror = () => reject(fail(transaction.error, t('storage.libraryWrite')))
     transaction.objectStore(META).put(record)
     transaction.objectStore(DATA).put({ id: info.id, bytes })
   })
@@ -113,12 +114,12 @@ export async function readRomData(id: string): Promise<{ bytes: Uint8Array; reco
     new Promise<RomRecord | undefined>((resolve, reject) => {
       const request = db.transaction(META, 'readonly').objectStore(META).get(id)
       request.onsuccess = () => resolve(request.result as RomRecord | undefined)
-      request.onerror = () => reject(fail(request.error, '读取游戏库失败'))
+      request.onerror = () => reject(fail(request.error, t('storage.libraryRead')))
     }),
     new Promise<{ bytes: Uint8Array } | undefined>((resolve, reject) => {
       const request = db.transaction(DATA, 'readonly').objectStore(DATA).get(id)
       request.onsuccess = () => resolve(request.result as { bytes: Uint8Array } | undefined)
-      request.onerror = () => reject(fail(request.error, '读取游戏失败'))
+      request.onerror = () => reject(fail(request.error, t('storage.romRead')))
     }),
   ])
 
@@ -131,7 +132,7 @@ export async function deleteRom(id: string): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const transaction = db.transaction([META, DATA], 'readwrite')
     transaction.oncomplete = () => resolve()
-    transaction.onerror = () => reject(fail(transaction.error, '删除失败'))
+    transaction.onerror = () => reject(fail(transaction.error, t('storage.delete')))
     transaction.objectStore(META).delete(id)
     transaction.objectStore(DATA).delete(id)
   })
@@ -142,7 +143,7 @@ export async function clearLibrary(): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const transaction = db.transaction([META, DATA], 'readwrite')
     transaction.oncomplete = () => resolve()
-    transaction.onerror = () => reject(fail(transaction.error, '清空失败'))
+    transaction.onerror = () => reject(fail(transaction.error, t('storage.clear')))
     transaction.objectStore(META).clear()
     transaction.objectStore(DATA).clear()
   })

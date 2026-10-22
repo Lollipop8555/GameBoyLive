@@ -3,6 +3,8 @@
  * 这里只负责把它读出来导出 / 写回去导入。框架无关，UI 层自己决定怎么展示。
  */
 
+import { t } from '../i18n'
+
 /** 手动即时存档槽数量。 */
 export const SLOT_COUNT = 4
 
@@ -50,7 +52,7 @@ function openDb(): Promise<IDBDatabase> {
       }
     }
     request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error ?? new Error('本地存档库打不开'))
+    request.onerror = () => reject(request.error ?? new Error(t('saves.dbOpen')))
   })
   return dbPromise
 }
@@ -78,7 +80,7 @@ export async function listSlots(romId: string): Promise<SlotMeta[]> {
           .sort((a, b) => a.slot - b.slot),
       )
     }
-    request.onerror = () => reject(fail(request.error, '读取存档列表失败'))
+    request.onerror = () => reject(fail(request.error, t('saves.list')))
   })
 }
 
@@ -94,7 +96,7 @@ export async function readSlot(romId: string, slot: number): Promise<SlotPayload
       }
       resolve({ bytes: new Uint8Array(row.bytes), shot: row.shot ?? null, at: row.at })
     }
-    request.onerror = () => reject(fail(request.error, '读取存档失败'))
+    request.onerror = () => reject(fail(request.error, t('saves.read')))
   })
 }
 
@@ -110,7 +112,7 @@ export async function writeSlot(
   return new Promise<SlotMeta>((resolve, reject) => {
     const request = db.transaction(STORE, 'readwrite').objectStore(STORE).put(row)
     request.onsuccess = () => resolve({ slot, at, size: bytes.byteLength, shot })
-    request.onerror = () => reject(fail(request.error, '写入存档失败'))
+    request.onerror = () => reject(fail(request.error, t('saves.write')))
   })
 }
 
@@ -119,7 +121,7 @@ export async function clearSlot(romId: string, slot: number): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const request = db.transaction(STORE, 'readwrite').objectStore(STORE).delete(`${romId}:${slot}`)
     request.onsuccess = () => resolve()
-    request.onerror = () => reject(fail(request.error, '删除存档失败'))
+    request.onerror = () => reject(fail(request.error, t('saves.delete')))
   })
 }
 
@@ -130,7 +132,7 @@ function opfsSupported(): boolean {
 }
 
 async function romDir(romId: string, create: boolean): Promise<FileSystemDirectoryHandle> {
-  if (!opfsSupported()) throw new Error('当前浏览器不支持 OPFS，无法读写卡带存档')
+  if (!opfsSupported()) throw new Error(t('storage.noOpfs'))
   const root = await navigator.storage.getDirectory()
   const parent = await root.getDirectoryHandle(OPFS_ROOT, { create })
   return parent.getDirectoryHandle(romId, { create })

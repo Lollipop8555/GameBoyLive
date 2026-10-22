@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { effectiveFilter, setDisplayMode, settings, type FilterId } from '../app/store'
+import { LOCALES, LOCALE_SHORT, locale, setLocale, t } from '../i18n'
 
 defineProps<{ paused: boolean; active: boolean; fullscreen: boolean; canFullscreen: boolean }>()
 const emit = defineEmits<{
@@ -14,23 +15,18 @@ const emit = defineEmits<{
   exit: []
 }>()
 
-const FILTERS: { id: FilterId; name: string }[] = [
-  { id: 'auto', name: '自动' },
-  { id: 'original', name: '原色' },
-  { id: 'dmglcd', name: '点阵绿' },
-  { id: 'grid', name: '栅格' },
-  { id: 'scanline', name: '扫描线' },
-]
+const FILTERS: FilterId[] = ['auto', 'original', 'dmglcd', 'grid', 'scanline']
 
+/** 名字从词典现取，切语言时跟着变；不要在模块顶层把中文烤进常量。 */
 const filterName = computed(() => {
   const current = effectiveFilter()
-  const item = FILTERS.find((f) => f.id === settings.filter)
-  return settings.filter === 'auto' ? `自动·${FILTERS.find((f) => f.id === current)!.name}` : item!.name
+  return settings.filter === 'auto'
+    ? t('filter.autoValue', { name: t(`filter.${current}`) })
+    : t(`filter.${settings.filter}`)
 })
 
 function cycleFilter() {
-  const index = FILTERS.findIndex((f) => f.id === settings.filter)
-  settings.filter = FILTERS[(index + 1) % FILTERS.length]!.id
+  settings.filter = FILTERS[(FILTERS.indexOf(settings.filter) + 1) % FILTERS.length]!
 }
 
 /** 窄屏把整条操作栏折成一枚菜单按钮，点外面收起 */
@@ -60,24 +56,47 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocPointer))
 
 <template>
   <div ref="root" class="toolbar" :class="{ 'is-open': menuOpen }" @keydown.esc="onRootEsc">
-    <button class="tb menu-btn" :aria-expanded="menuOpen" aria-label="菜单" @click="menuOpen = !menuOpen">
+    <button
+      class="tb menu-btn"
+      :aria-expanded="menuOpen"
+      :aria-label="t('toolbar.menu')"
+      @click="menuOpen = !menuOpen"
+    >
       <span class="menu-glyph" aria-hidden="true"><i /><i /><i /></span>
     </button>
 
     <div class="tb-items">
-      <button class="tb" :disabled="!active" :aria-pressed="paused" @click="emit('pause')">
-        {{ paused ? '继续' : '暂停' }}
-      </button>
 
-      <div class="seg" role="group" aria-label="显示模式">
-        <button :aria-pressed="settings.displayMode === 'full'" @click="setDisplayMode('full')">整机</button>
-        <button :aria-pressed="settings.displayMode === 'focus'" @click="setDisplayMode('focus')">面板</button>
+      <!-- 语言切换固定在菜单顶部：横屏矮视口里菜单要滚动，放末尾会被折到看不见的地方 -->
+      <div class="seg seg-lang" role="group" :aria-label="t('lang.label')">
+        <button
+          v-for="item in LOCALES"
+          :key="item"
+          :aria-pressed="locale === item"
+          :lang="item === 'zh' ? 'zh-CN' : 'en'"
+          @click="setLocale(item)"
+        >
+          {{ LOCALE_SHORT[item] }}
+        </button>
       </div>
 
-      <button class="tb" @click="cycleFilter">滤镜 {{ filterName }}</button>
+      <button class="tb" :disabled="!active" :aria-pressed="paused" @click="emit('pause')">
+        {{ paused ? t('toolbar.resume') : t('toolbar.pause') }}
+      </button>
+
+      <div class="seg" role="group" :aria-label="t('toolbar.displayMode')">
+        <button :aria-pressed="settings.displayMode === 'full'" @click="setDisplayMode('full')">
+          {{ t('toolbar.modeFull') }}
+        </button>
+        <button :aria-pressed="settings.displayMode === 'focus'" @click="setDisplayMode('focus')">
+          {{ t('toolbar.modeFocus') }}
+        </button>
+      </div>
+
+      <button class="tb" @click="cycleFilter">{{ t('toolbar.filter') }} {{ filterName }}</button>
 
       <label class="vol" :class="{ off: !active }">
-        <span aria-hidden="true">音量</span>
+        <span aria-hidden="true">{{ t('toolbar.volume') }}</span>
         <input
           v-model.number="settings.volume"
           type="range"
@@ -85,22 +104,38 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocPointer))
           max="1"
           step="0.05"
           :disabled="!active"
-          aria-label="音量"
+          :aria-label="t('toolbar.volume')"
         />
       </label>
 
       <button v-if="canFullscreen" class="tb" @click="pick(() => emit('fullscreen'))">
-        {{ fullscreen ? '退出全屏' : '全屏' }}
+        {{ fullscreen ? t('toolbar.exitFullscreen') : t('toolbar.fullscreen') }}
       </button>
 
-      <button class="tb" :disabled="!active" title="即时存档 / 卡带存档" @click="pick(() => emit('saves'))">
-        存档
+      <button
+        class="tb"
+        :disabled="!active"
+        :title="t('toolbar.savesTitle')"
+        @click="pick(() => emit('saves'))"
+      >
+        {{ t('toolbar.saves') }}
       </button>
-      <button class="tb" title="自定义键位" @click="pick(() => emit('keys'))">键位</button>
-      <button class="tb" title="显示 / 按键 / 声音" @click="pick(() => emit('settings'))">设置</button>
-      <button class="tb" title="预置游戏与最近打开" @click="pick(() => emit('library'))">游戏</button>
-      <button class="tb" @click="pick(() => emit('open'))">{{ active ? '更换 ROM' : '打开 ROM' }}</button>
-      <button class="tb" :disabled="!active" @click="pick(() => emit('exit'))">退出</button>
+      <button class="tb" :title="t('toolbar.keysTitle')" @click="pick(() => emit('keys'))">
+        {{ t('toolbar.keys') }}
+      </button>
+      <button class="tb" :title="t('toolbar.settingsTitle')" @click="pick(() => emit('settings'))">
+        {{ t('toolbar.settings') }}
+      </button>
+      <button class="tb" :title="t('toolbar.libraryTitle')" @click="pick(() => emit('library'))">
+        {{ t('toolbar.library') }}
+      </button>
+      <button class="tb" @click="pick(() => emit('open'))">
+        {{ active ? t('toolbar.changeRom') : t('toolbar.openRom') }}
+      </button>
+      <button class="tb" :disabled="!active" @click="pick(() => emit('exit'))">
+        {{ t('toolbar.exit') }}
+      </button>
+
     </div>
   </div>
 </template>
@@ -174,6 +209,12 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocPointer))
 .tb-items .seg button {
   flex: 1;
   text-align: center;
+}
+
+/* 语言切换：两档字数不一样（中 / EN），给个下限免得切换时按钮跳宽 */
+.tb-items .seg-lang button {
+  min-width: 2.6em;
+  letter-spacing: 0.02em;
 }
 
 /* 整条操作栏默认折成一枚菜单键——桌面也一样：玩的时候屏幕才是主角，

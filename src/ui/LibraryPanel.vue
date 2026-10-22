@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { loadCatalog, type GameEntry } from '../core/GameCatalog'
 import { MAX_ROMS, deleteRom, listRoms, type RomRecord } from '../core/RomLibrary'
+import { locale, t } from '../i18n'
 
 const emit = defineEmits<{ close: []; pick: [id: string]; bundle: [game: GameEntry]; open: [] }>()
 
@@ -50,13 +51,13 @@ async function remove(row: RomRecord) {
 
 function when(at: number): string {
   const minutes = Math.floor((Date.now() - at) / 60_000)
-  if (minutes < 1) return '刚刚'
-  if (minutes < 60) return `${minutes} 分钟前`
+  if (minutes < 1) return t('time.justNow')
+  if (minutes < 60) return t('time.minutes', { n: minutes })
   const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours} 小时前`
+  if (hours < 24) return t('time.hours', { n: hours })
   const days = Math.floor(hours / 24)
-  if (days < 30) return `${days} 天前`
-  return new Date(at).toLocaleDateString()
+  if (days < 30) return t('time.days', { n: days })
+  return new Date(at).toLocaleDateString(locale.value === 'zh' ? 'zh-CN' : 'en')
 }
 
 function size(bytes: number): string {
@@ -81,32 +82,32 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   <div class="scrim" @click.self="emit('close')">
     <section class="panel" role="dialog" aria-modal="true" aria-labelledby="library-title">
       <header class="panel__head">
-        <h2 id="library-title">游戏</h2>
+        <h2 id="library-title">{{ t('library.title') }}</h2>
         <input
           v-if="total > 4"
           v-model="query"
           class="search"
           type="search"
-          placeholder="搜索"
-          aria-label="搜索游戏"
+          :placeholder="t('library.search')"
+          :aria-label="t('library.searchAria')"
         />
-        <button class="x" aria-label="关闭" @click="emit('close')">✕</button>
+        <button class="x" :aria-label="t('common.close')" @click="emit('close')">✕</button>
       </header>
 
       <div class="panel__body">
-        <p v-if="loading" class="note">读取中…</p>
+        <p v-if="loading" class="note">{{ t('common.reading') }}</p>
         <p v-else-if="error" class="note error">{{ error }}</p>
         <p v-else-if="nothing" class="empty">
-          <template v-if="term">没有匹配「{{ query.trim() }}」的游戏。</template>
-          <template v-else>还没有游戏。<br />拖入或选择一个 ROM，下次就能直接从这里打开。</template>
+          <template v-if="term">{{ t('library.noMatch', { q: query.trim() }) }}</template>
+          <template v-else>{{ t('library.empty') }}<br />{{ t('library.emptyHint') }}</template>
         </p>
 
         <template v-else>
           <section v-if="shownBundled.length" class="group">
             <h3 class="group__name">
-              随项目提供
+              {{ t('library.bundled') }}
               <!-- 这段只在本地调试出现，部署产物里默认没有，写清楚免得误会 -->
-              <span class="group__note">本地 games/ · 不随部署发布</span>
+              <span class="group__note">{{ t('library.bundledNote') }}</span>
             </h3>
             <ul class="list">
               <li v-for="game in shownBundled" :key="game.file">
@@ -122,7 +123,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
           </section>
 
           <section v-if="shownRecent.length" class="group">
-            <h3 class="group__name">最近打开</h3>
+            <h3 class="group__name">{{ t('library.recent') }}</h3>
             <ul class="list">
               <li v-for="row in shownRecent" :key="row.id">
                 <button class="card" @click="emit('pick', row.id)">
@@ -132,7 +133,13 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
                     {{ size(row.size) }} · {{ when(row.at) }}
                   </span>
                 </button>
-                <button class="del" :aria-label="`删除 ${row.title || row.name}`" @click="remove(row)">✕</button>
+                <button
+                  class="del"
+                  :aria-label="t('library.delete', { name: row.title || row.name })"
+                  @click="remove(row)"
+                >
+                  ✕
+                </button>
               </li>
             </ul>
           </section>
@@ -140,10 +147,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
       </div>
 
       <footer class="panel__foot">
-        <button class="ghost" @click="emit('open')">从文件打开</button>
+        <button class="ghost" @click="emit('open')">{{ t('library.openFile') }}</button>
         <span class="spacer" />
-        <span v-if="recent.length" class="hint">最近最多 {{ MAX_ROMS }} 个 · 只存本机</span>
-        <button class="ghost" @click="emit('close')">完成</button>
+        <span v-if="recent.length" class="hint">{{ t('library.limit', { n: MAX_ROMS }) }}</span>
+        <button class="ghost" @click="emit('close')">{{ t('common.done') }}</button>
       </footer>
     </section>
   </div>

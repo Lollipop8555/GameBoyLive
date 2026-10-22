@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { DEFAULT_KEYMAP, actionsFor } from '../core/InputManager'
-import { ACTION_LABEL, formatKeyLabel } from '../core/keyLabel'
+import { actionLabel, formatKeyLabel } from '../core/keyLabel'
 import { clearLibrary, listRoms } from '../core/RomLibrary'
 import {
   askDurableStorage,
@@ -13,6 +13,7 @@ import {
   type FilterId,
   type TouchLayerMode,
 } from '../app/store'
+import { LOCALES, LOCALE_NAME, locale, setLocale, t } from '../i18n'
 
 const emit = defineEmits<{ close: []; keys: [] }>()
 
@@ -20,36 +21,21 @@ type Tab = 'display' | 'keys' | 'audio' | 'about'
 
 const tab = ref<Tab>('display')
 
-const TABS: { id: Tab; name: string }[] = [
-  { id: 'display', name: '显示' },
-  { id: 'keys', name: '按键' },
-  { id: 'audio', name: '声音' },
-  { id: 'about', name: '关于' },
-]
-
-const FILTERS: { id: FilterId; name: string }[] = [
-  { id: 'auto', name: '自动' },
-  { id: 'original', name: '原色' },
-  { id: 'dmglcd', name: '点阵绿' },
-  { id: 'grid', name: '栅格' },
-  { id: 'scanline', name: '扫描线' },
-]
-
-const TOUCH: { id: TouchLayerMode; name: string }[] = [
-  { id: 'auto', name: '自动' },
-  { id: 'on', name: '开' },
-  { id: 'off', name: '关' },
-]
+const TABS: Tab[] = ['display', 'keys', 'audio', 'about']
+const FILTERS: FilterId[] = ['auto', 'original', 'dmglcd', 'grid', 'scanline']
+const TOUCH: TouchLayerMode[] = ['auto', 'on', 'off']
 
 /** 自动档跟随机型：DMG 上四阶绿，其余保持原色。 */
 const filterHint = computed(() =>
-  settings.filter === 'auto' ? `当前生效：${FILTERS.find((f) => f.id === effectiveFilter())?.name}` : '',
+  settings.filter === 'auto'
+    ? t('settings.filterActive', { name: t(`filter.${effectiveFilter()}`) })
+    : '',
 )
 
 const actions = computed(() => actionsFor(session.rom?.system ?? 'gba'))
 
 function bindHint(code: string | null): string {
-  return code ? formatKeyLabel(code) : '未绑定'
+  return code ? formatKeyLabel(code) : t('settings.unbound')
 }
 
 function resetKeymap() {
@@ -69,7 +55,7 @@ async function refreshCacheCount() {
 async function clearCache() {
   try {
     await clearLibrary()
-    cacheMsg.value = '本地缓存已清空'
+    cacheMsg.value = t('settings.cleared')
   } catch (cause) {
     cacheMsg.value = cause instanceof Error ? cause.message : String(cause)
   }
@@ -94,49 +80,53 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   <div class="scrim" @click.self="emit('close')">
     <section class="panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <header class="panel__head">
-        <h2 id="settings-title">设置</h2>
+        <h2 id="settings-title">{{ t('settings.title') }}</h2>
         <nav class="tabs" role="tablist">
           <button
             v-for="item in TABS"
-            :key="item.id"
+            :key="item"
             role="tab"
-            :aria-selected="tab === item.id"
-            :class="{ on: tab === item.id }"
-            @click="tab = item.id"
+            :aria-selected="tab === item"
+            :class="{ on: tab === item }"
+            @click="tab = item"
           >
-            {{ item.name }}
+            {{ t(`tab.${item}`) }}
           </button>
         </nav>
-        <button class="x" aria-label="关闭" @click="emit('close')">✕</button>
+        <button class="x" :aria-label="t('common.close')" @click="emit('close')">✕</button>
       </header>
 
       <div class="panel__body">
         <template v-if="tab === 'display'">
           <div class="row">
-            <span class="row__label">显示模式</span>
-            <div class="seg" role="group" aria-label="显示模式">
-              <button :aria-pressed="settings.displayMode === 'full'" @click="setDisplayMode('full')">整机</button>
-              <button :aria-pressed="settings.displayMode === 'focus'" @click="setDisplayMode('focus')">面板</button>
+            <span class="row__label">{{ t('toolbar.displayMode') }}</span>
+            <div class="seg" role="group" :aria-label="t('toolbar.displayMode')">
+              <button :aria-pressed="settings.displayMode === 'full'" @click="setDisplayMode('full')">
+                {{ t('toolbar.modeFull') }}
+              </button>
+              <button :aria-pressed="settings.displayMode === 'focus'" @click="setDisplayMode('focus')">
+                {{ t('toolbar.modeFocus') }}
+              </button>
             </div>
           </div>
 
           <div class="row">
-            <span class="row__label">滤镜</span>
-            <div class="seg" role="group" aria-label="滤镜">
+            <span class="row__label">{{ t('settings.filter') }}</span>
+            <div class="seg" role="group" :aria-label="t('settings.filter')">
               <button
                 v-for="item in FILTERS"
-                :key="item.id"
-                :aria-pressed="settings.filter === item.id"
-                @click="settings.filter = item.id"
+                :key="item"
+                :aria-pressed="settings.filter === item"
+                @click="settings.filter = item"
               >
-                {{ item.name }}
+                {{ t(`filter.${item}`) }}
               </button>
             </div>
           </div>
           <p v-if="filterHint" class="note">{{ filterHint }}</p>
 
           <div class="row">
-            <span class="row__label">像素锐化</span>
+            <span class="row__label">{{ t('settings.sharp') }}</span>
             <button
               class="switch"
               role="switch"
@@ -147,10 +137,10 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
               <i />
             </button>
           </div>
-          <p class="note">开：像素边缘硬朗；关：交给浏览器插值，小屏看着更柔和。</p>
+          <p class="note">{{ t('settings.sharpNote') }}</p>
 
           <div class="row">
-            <span class="row__label">圆角遮罩</span>
+            <span class="row__label">{{ t('settings.mask') }}</span>
             <button
               class="switch"
               role="switch"
@@ -161,27 +151,25 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
               <i />
             </button>
           </div>
-          <p class="note">
-            默认关。开：画面四角按外框弧线裁切；关：直角。部分浏览器（尤其 Safari）对画布合成层的圆角裁切不稳定，开了也可能仍是直角。
-          </p>
+          <p class="note">{{ t('settings.maskNote') }}</p>
 
           <div class="row">
-            <span class="row__label">屏幕按键</span>
-            <div class="seg" role="group" aria-label="屏幕按键">
+            <span class="row__label">{{ t('settings.touch') }}</span>
+            <div class="seg" role="group" :aria-label="t('settings.touch')">
               <button
                 v-for="item in TOUCH"
-                :key="item.id"
-                :aria-pressed="settings.touchLayer === item.id"
-                @click="settings.touchLayer = item.id"
+                :key="item"
+                :aria-pressed="settings.touchLayer === item"
+                @click="settings.touchLayer = item"
               >
-                {{ item.name }}
+                {{ t(`touch.${item}`) }}
               </button>
             </div>
           </div>
-          <p class="note">自动：触屏设备开启，桌面隐藏（鼠标仍可点）。</p>
+          <p class="note">{{ t('settings.touchNote') }}</p>
 
           <div class="row">
-            <span class="row__label">键位标注</span>
+            <span class="row__label">{{ t('settings.badges') }}</span>
             <button
               class="switch"
               role="switch"
@@ -192,13 +180,28 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
               <i />
             </button>
           </div>
-          <p class="note">在按键上刻出对应的键盘键，关掉后键帽只剩箭头和字母。</p>
+          <p class="note">{{ t('settings.badgesNote') }}</p>
+
+          <div class="row">
+            <span class="row__label">{{ t('lang.label') }}</span>
+            <div class="seg" role="group" :aria-label="t('lang.label')">
+              <button
+                v-for="item in LOCALES"
+                :key="item"
+                :aria-pressed="locale === item"
+                :lang="item === 'zh' ? 'zh-CN' : 'en'"
+                @click="setLocale(item)"
+              >
+                {{ LOCALE_NAME[item] }}
+              </button>
+            </div>
+          </div>
         </template>
 
         <template v-else-if="tab === 'keys'">
           <ul class="keys">
             <li v-for="action in actions" :key="action">
-              <span class="name">{{ ACTION_LABEL[action] }}</span>
+              <span class="name">{{ actionLabel(action) }}</span>
               <span class="code" :class="{ empty: !settings.keymap[action] }">{{ bindHint(settings.keymap[action]) }}</span>
             </li>
           </ul>
@@ -206,13 +209,21 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
         <template v-else-if="tab === 'audio'">
           <div class="row">
-            <span class="row__label">音量</span>
-            <input v-model.number="settings.volume" class="range" type="range" min="0" max="1" step="0.05" aria-label="音量" />
+            <span class="row__label">{{ t('settings.volume') }}</span>
+            <input
+              v-model.number="settings.volume"
+              class="range"
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              :aria-label="t('settings.volume')"
+            />
             <span class="value">{{ Math.round(settings.volume * 100) }}%</span>
           </div>
 
           <div class="row">
-            <span class="row__label">静音</span>
+            <span class="row__label">{{ t('settings.mute') }}</span>
             <button
               class="switch"
               role="switch"
@@ -223,36 +234,37 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
               <i />
             </button>
           </div>
-          <p class="note">静音只影响输出，游戏照常运行。</p>
+          <p class="note">{{ t('settings.muteNote') }}</p>
         </template>
 
         <template v-else>
           <dl class="about">
-            <dt>内核</dt>
-            <dd>mGBA（wasm 编译版），同时覆盖 GB / GBC / GBA</dd>
-            <dt>许可</dt>
-            <dd>内核 MPL-2.0 · 本项目 MIT</dd>
-            <dt>ROM</dt>
-            <dd>不内置、不下载、不上传任何游戏，文件只在本地浏览器内处理</dd>
-            <dt>快捷键</dt>
-            <dd><kbd>`</kbd> 切换整机 / 面板 · <kbd>Esc</kbd> 暂停 · 面板内 <kbd>Esc</kbd> 关闭</dd>
+            <dt>{{ t('about.core') }}</dt>
+            <dd>{{ t('about.coreValue') }}</dd>
+            <dt>{{ t('about.license') }}</dt>
+            <dd>{{ t('about.licenseValue') }}</dd>
+            <dt>{{ t('about.rom') }}</dt>
+            <dd>{{ t('about.romValue') }}</dd>
+            <dt>{{ t('about.shortcuts') }}</dt>
+            <dd>
+              <kbd>`</kbd> {{ t('about.kbToggle') }} · <kbd>Esc</kbd>
+              {{ t('about.kbPause') }} · {{ t('about.kbEscClose') }}
+            </dd>
           </dl>
 
           <div class="row">
-            <span class="row__label">存档保护</span>
-            <span class="count">{{ device.durable ? '已开启' : '未开启' }}</span>
-            <button v-if="!device.durable" class="ghost" @click="askDurableStorage">申请</button>
+            <span class="row__label">{{ t('settings.durable') }}</span>
+            <span class="count">{{ device.durable ? t('settings.on') : t('settings.off') }}</span>
+            <button v-if="!device.durable" class="ghost" @click="askDurableStorage">
+              {{ t('settings.apply') }}
+            </button>
           </div>
           <p class="note">
-            {{
-              device.durable
-                ? '浏览器已承诺不清理本站数据，即时存档与卡带存档不会因为存储紧张被悄悄清掉。'
-                : '浏览器还没承诺保留本站数据：存储吃紧时可能清掉即时存档与卡带存档，重要进度请导出 .sav。'
-            }}
+            {{ device.durable ? t('settings.durableOk') : t('settings.durableNo') }}
           </p>
 
           <div class="row">
-            <span class="row__label">缓存 ROM</span>
+            <span class="row__label">{{ t('settings.cacheRoms') }}</span>
             <button
               class="switch"
               role="switch"
@@ -263,22 +275,28 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
               <i />
             </button>
           </div>
-          <p class="note">开启后「最近」里能直接点开玩过的 ROM，文件只存在本机。</p>
+          <p class="note">{{ t('settings.cacheRomsNote') }}</p>
 
           <div class="row">
-            <span class="row__label">本地缓存</span>
-            <span class="count">{{ cacheCount }} 个 ROM</span>
-            <button class="ghost" :disabled="!cacheCount" @click="clearCache">清空</button>
+            <span class="row__label">{{ t('settings.localCache') }}</span>
+            <span class="count">{{ t('settings.romCount', { n: cacheCount }) }}</span>
+            <button class="ghost" :disabled="!cacheCount" @click="clearCache">
+              {{ t('settings.clear') }}
+            </button>
           </div>
           <p v-if="cacheMsg" class="note">{{ cacheMsg }}</p>
         </template>
       </div>
 
       <footer class="panel__foot">
-        <button v-if="tab === 'keys'" class="ghost" @click="resetKeymap">恢复默认键位</button>
-        <button v-if="tab === 'keys'" class="ghost strong" @click="emit('keys')">打开键位编辑器</button>
+        <button v-if="tab === 'keys'" class="ghost" @click="resetKeymap">
+          {{ t('settings.resetKeys') }}
+        </button>
+        <button v-if="tab === 'keys'" class="ghost strong" @click="emit('keys')">
+          {{ t('settings.openEditor') }}
+        </button>
         <span class="spacer" />
-        <button class="ghost" @click="emit('close')">完成</button>
+        <button class="ghost" @click="emit('close')">{{ t('common.done') }}</button>
       </footer>
     </section>
   </div>

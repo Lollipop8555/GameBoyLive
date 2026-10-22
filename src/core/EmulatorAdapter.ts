@@ -1,5 +1,6 @@
 import { load } from '@wasm-gaming/mgba-wasm'
 import type { MgbaEngine, RomInfo } from './types'
+import { t } from '../i18n'
 
 export interface BootParams {
   canvas: HTMLCanvasElement
@@ -73,12 +74,12 @@ export class EmulatorAdapter {
   }
 
   saveState(): Promise<Uint8Array> {
-    if (!this.engine) return Promise.reject(new Error('内核未启动'))
+    if (!this.engine) return Promise.reject(new Error(t('error.noEngine')))
     return this.engine.saveState()
   }
 
   loadState(data: Uint8Array): Promise<void> {
-    if (!this.engine) return Promise.reject(new Error('内核未启动'))
+    if (!this.engine) return Promise.reject(new Error(t('error.noEngine')))
     return this.engine.loadState(data)
   }
 
