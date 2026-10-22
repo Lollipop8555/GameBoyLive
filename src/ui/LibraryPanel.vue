@@ -103,7 +103,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
         <template v-else>
           <section v-if="shownBundled.length" class="group">
-            <h3 class="group__name">随项目提供</h3>
+            <h3 class="group__name">
+              随项目提供
+              <!-- 这段只在本地调试出现，部署产物里默认没有，写清楚免得误会 -->
+              <span class="group__note">本地 games/ · 不随部署发布</span>
+            </h3>
             <ul class="list">
               <li v-for="game in shownBundled" :key="game.file">
                 <button class="card" @click="emit('bundle', game)">
@@ -259,11 +263,25 @@ h2 {
 }
 
 .group__name {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   margin: 0;
   padding: 4px 8px 6px;
   font: 600 10px / 1 ui-monospace, SFMono-Regular, Menlo, monospace;
   letter-spacing: 0.18em;
   color: #6f7785;
+}
+
+/* 来源说明：比分组名再淡一档，像标签上的小字，不抢游戏标题 */
+.group__note {
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: #565d6a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .list {

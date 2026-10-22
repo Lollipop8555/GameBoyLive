@@ -13,13 +13,20 @@ interface Settings {
   /** 用户手动选过模式：为真时不再按屏幕尺寸纠正默认值。 */
   modePinned: boolean
   filter: FilterId
+  /** 像素锐化：关掉走浏览器平滑插值，画面变软但小屏更顺眼。 */
+  sharpPixels: boolean
+  /**
+   * 画面圆角遮罩：把画面四角按外框弧线裁掉。默认关——这台机器对画布
+   * （尤其 WebGL 合成层）的圆角裁切在不同浏览器上并不可靠，开了也可能
+   * 仍显示直角，所以不把它当作默认外观。
+   */
+  screenMask: boolean
   volume: number
   muted: boolean
   /** 把 ROM 留在 IndexedDB 里做「最近游戏」，关掉后不再新增，已有的保留。 */
   cacheRoms: boolean
   badges: boolean
   touchLayer: TouchLayerMode
-  showFps: boolean
   keymap: Keymap
 }
 
@@ -53,12 +60,13 @@ function loadSettings(): Settings {
     displayMode: defaultDisplayMode(),
     modePinned: false,
     filter: 'auto',
+    sharpPixels: true,
+    screenMask: false,
     volume: 0.7,
     muted: false,
     cacheRoms: true,
     badges: true,
     touchLayer: 'auto',
-    showFps: false,
     keymap: { ...DEFAULT_KEYMAP },
   }
 

@@ -6,7 +6,7 @@ import { gameUrl, type GameEntry } from '../core/GameCatalog'
 import { toEngineInput } from '../core/InputManager'
 import { readRom } from '../core/romInfo'
 import { readRomData, saveRom } from '../core/RomLibrary'
-import { download, readSram, safeFileName, writeSram } from '../core/StorageService'
+import { download, downloadBlob, readSram, safeFileName, writeSram } from '../core/StorageService'
 import type { RomInfo } from '../core/types'
 import Dropzone from '../ui/Dropzone.vue'
 import KeymapPanel from '../ui/KeymapPanel.vue'
@@ -25,6 +25,25 @@ const canvasEl = ref<HTMLCanvasElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const dragging = ref(false)
 const paused = ref(false)
+
+/** iPhone 的 Safari 至今不支持元素级全屏，这时干脆不摆这个按钮 */
+const canFullscreen =
+  typeof document !== 'undefined' && typeof document.documentElement.requestFullscreen === 'function'
+const fullscreen = ref(false)
+
+function syncFullscreen() {
+  fullscreen.value = Boolean(document.fullscreenElement)
+}
+
+/** 全屏是浏览器状态，不从设置里恢复；退出由 F11 / Esc / 这里三者任一路径触发 */
+async function toggleFullscreen() {
+  try {
+    if (document.fullscreenElement) await document.exitFullscreen()
+    else await document.documentElement.requestFullscreen()
+  } catch {
+    /* 非用户手势或策略禁止时浏览器会 reject，保持原状即可 */
+  }
+}
 
 let frameTick = 0
 let dragDepth = 0
@@ -196,6 +215,19 @@ async function exportSav() {
   download(`${safeFileName(rom.title || rom.name)}.sav`, sram)
 }
 
+/** 截图存 PNG：文件名带卡带标题和本地时间，落到相册/下载目录里好认。 */
+async function capturePng() {
+  const engine = adapter.value
+  if (!engine) throw new Error('内核还没启动')
+  const shot = await engine.screenshot()
+  if (!shot) throw new Error('这一帧没截到，等画面动一下再试')
+  const rom = session.rom
+  const stamp = new Date()
+    .toLocaleString('sv-SE')
+    .replace(/[: ]/g, '-')
+  downloadBlob(`${safeFileName(rom?.title || rom?.name || 'game')} ${stamp}.png`, shot)
+}
+
 async function importSav(file: File) {
   const rom = session.rom
   const original = romBytes.value
@@ -336,6 +368,7 @@ onMounted(() => {
   }
 
   window.addEventListener('keydown', onKeyDown)
+  document.addEventListener('fullscreenchange', syncFullscreen)
   window.addEventListener('dragenter', onDragEnter)
   window.addEventListener('dragover', onDragOver)
   window.addEventListener('dragleave', onDragLeave)
@@ -346,6 +379,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeyDown)
+  document.removeEventListener('fullscreenchange', syncFullscreen)
   window.removeEventListener('dragenter', onDragEnter)
   window.removeEventListener('dragover', onDragOver)
   window.removeEventListener('dragleave', onDragLeave)
@@ -363,12 +397,15 @@ onBeforeUnmount(() => {
       <Toolbar
         :paused="paused"
         :active="session.phase !== 'idle'"
+        :fullscreen="fullscreen"
+        :can-fullscreen="canFullscreen"
         @pause="togglePause"
         @open="pickFile"
         @library="ui.libraryOpen = true"
         @keys="ui.keymapOpen = true"
         @saves="ui.saveOpen = true"
         @settings="ui.settingsOpen = true"
+        @fullscreen="toggleFullscreen"
         @exit="exitToIdle"
       />
     </header>
@@ -378,8 +415,15 @@ onBeforeUnmount(() => {
       <div class="stage__mesh" aria-hidden="true" />
 
       <div class="rig" :data-mode="mode" :style="{ '--glass-ratio': glassRatio }">
-        <ShellGlass :model="model" :mode="mode" :title="cartTitle">
-          <Screen @ready="adoptCanvas" @pick="pickFile" />
+        <ShellGlass
+          :model="model"
+          :mode="mode"
+          :title="cartTitle"
+          :fps="session.fps"
+          :phase="session.phase"
+          @toggle-pause="togglePause"
+        >
+          <Screen @ready="adoptCanvas" @pick="pickFile" @resume="togglePause" />
         </ShellGlass>
 
         <TouchDeck v-if="touchOn" :mode="mode === 'focus' ? 'panel' : 'full'" />
@@ -413,6 +457,7 @@ onBeforeUnmount(() => {
       :restore="restoreState"
       :export-sav="exportSav"
       :import-sav="importSav"
+      :capture-shot="capturePng"
       @close="ui.saveOpen = false"
     />
   </div>

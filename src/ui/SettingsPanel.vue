@@ -127,6 +127,36 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
           <p v-if="filterHint" class="note">{{ filterHint }}</p>
 
           <div class="row">
+            <span class="row__label">像素锐化</span>
+            <button
+              class="switch"
+              role="switch"
+              :aria-checked="settings.sharpPixels"
+              :class="{ on: settings.sharpPixels }"
+              @click="settings.sharpPixels = !settings.sharpPixels"
+            >
+              <i />
+            </button>
+          </div>
+          <p class="note">开：像素边缘硬朗；关：交给浏览器插值，小屏看着更柔和。</p>
+
+          <div class="row">
+            <span class="row__label">圆角遮罩</span>
+            <button
+              class="switch"
+              role="switch"
+              :aria-checked="settings.screenMask"
+              :class="{ on: settings.screenMask }"
+              @click="settings.screenMask = !settings.screenMask"
+            >
+              <i />
+            </button>
+          </div>
+          <p class="note">
+            默认关。开：画面四角按外框弧线裁切；关：直角。部分浏览器（尤其 Safari）对画布合成层的圆角裁切不稳定，开了也可能仍是直角。
+          </p>
+
+          <div class="row">
             <span class="row__label">屏幕按键</span>
             <div class="seg" role="group" aria-label="屏幕按键">
               <button
@@ -140,19 +170,6 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
             </div>
           </div>
           <p class="note">自动：触屏设备开启，桌面隐藏（鼠标仍可点）。</p>
-
-          <div class="row">
-            <span class="row__label">帧率显示</span>
-            <button
-              class="switch"
-              role="switch"
-              :aria-checked="settings.showFps"
-              :class="{ on: settings.showFps }"
-              @click="settings.showFps = !settings.showFps"
-            >
-              <i />
-            </button>
-          </div>
 
           <div class="row">
             <span class="row__label">键位标注</span>

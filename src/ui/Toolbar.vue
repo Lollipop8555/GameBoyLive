@@ -1,9 +1,18 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { effectiveFilter, setDisplayMode, settings, session, type FilterId } from '../app/store'
+import { effectiveFilter, setDisplayMode, settings, type FilterId } from '../app/store'
 
-defineProps<{ paused: boolean; active: boolean }>()
-const emit = defineEmits<{ pause: []; open: []; library: []; keys: []; saves: []; settings: []; exit: [] }>()
+defineProps<{ paused: boolean; active: boolean; fullscreen: boolean; canFullscreen: boolean }>()
+const emit = defineEmits<{
+  pause: []
+  open: []
+  library: []
+  keys: []
+  saves: []
+  settings: []
+  fullscreen: []
+  exit: []
+}>()
 
 const FILTERS: { id: FilterId; name: string }[] = [
   { id: 'auto', name: '自动' },
@@ -38,12 +47,19 @@ function pick(action: () => void) {
   action()
 }
 
+/** Esc 只管关菜单，且不外传：否则同一下 Esc 还会把游戏暂停掉 */
+function onRootEsc(event: KeyboardEvent) {
+  if (!menuOpen.value) return
+  menuOpen.value = false
+  event.stopPropagation()
+}
+
 onMounted(() => document.addEventListener('pointerdown', onDocPointer))
 onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocPointer))
 </script>
 
 <template>
-  <div ref="root" class="toolbar" :class="{ 'is-open': menuOpen }">
+  <div ref="root" class="toolbar" :class="{ 'is-open': menuOpen }" @keydown.esc="onRootEsc">
     <button class="tb menu-btn" :aria-expanded="menuOpen" aria-label="菜单" @click="menuOpen = !menuOpen">
       <span class="menu-glyph" aria-hidden="true"><i /><i /><i /></span>
     </button>
@@ -73,6 +89,10 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocPointer))
         />
       </label>
 
+      <button v-if="canFullscreen" class="tb" @click="pick(() => emit('fullscreen'))">
+        {{ fullscreen ? '退出全屏' : '全屏' }}
+      </button>
+
       <button class="tb" :disabled="!active" title="即时存档 / 卡带存档" @click="pick(() => emit('saves'))">
         存档
       </button>
@@ -81,8 +101,6 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocPointer))
       <button class="tb" title="预置游戏与最近打开" @click="pick(() => emit('library'))">游戏</button>
       <button class="tb" @click="pick(() => emit('open'))">{{ active ? '更换 ROM' : '打开 ROM' }}</button>
       <button class="tb" :disabled="!active" @click="pick(() => emit('exit'))">退出</button>
-
-      <span v-if="settings.showFps" class="fps">{{ session.fps }} FPS</span>
     </div>
   </div>
 </template>
@@ -105,14 +123,67 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocPointer))
 }
 
 .tb-items {
-  display: flex;
-  align-items: center;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  display: none;
+  flex-direction: column;
+  align-items: stretch;
   gap: 2px;
-  min-width: 0;
+  min-width: 184px;
+  padding: 6px;
+  /* 矮屏（横屏手机）里这列按钮比视口还高，按到视口底部就截止、
+     在菜单内部滚动，最下面的「退出」也点得到 */
+  max-height: calc(100dvh - var(--chrome-h) - 10px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* 滚动照旧，但那根灰条不要：它挂在圆角边框内侧，比菜单本身还显眼。
+     滚动靠滚轮/触摸/键盘方向键，不需要可见滑块 */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(28, 32, 39, 0.98), rgba(14, 16, 21, 0.99));
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.62);
 }
 
+.toolbar.is-open .tb-items {
+  display: flex;
+}
+
+/* WebKit 系不认 scrollbar-width，用伪元素把滑块压成 0 宽 */
+.tb-items::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.tb-items > * {
+  width: 100%;
+}
+
+.tb-items button {
+  text-align: left;
+  padding: 8px 10px;
+}
+
+.tb-items .seg {
+  justify-content: stretch;
+}
+
+.tb-items .seg button {
+  flex: 1;
+  text-align: center;
+}
+
+/* 整条操作栏默认折成一枚菜单键——桌面也一样：玩的时候屏幕才是主角，
+   一排按钮贴在顶边太吵。展开成下拉，点外面或 Esc 收起 */
 .menu-btn {
-  display: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 28px;
+  padding: 0;
 }
 
 .menu-glyph {
@@ -183,98 +254,22 @@ button[aria-pressed='true'] {
   padding: 5px 10px;
 }
 
+/* 音量在菜单里是一整行：标签左、滑杆右 */
 .vol {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 6px 0 10px;
-  margin-left: 2px;
-  border-left: 1px solid var(--line-soft);
+  gap: 10px;
+  padding: 8px 10px;
+  margin-top: 2px;
+  border-top: 1px solid var(--line-soft);
   font-size: 11.5px;
   letter-spacing: 0.06em;
   color: var(--text-dim);
 }
 
 .vol input {
-  width: 74px;
+  flex: 1;
+  width: auto;
   accent-color: #cfd4de;
-}
-
-.fps {
-  font: 11.5px / 1 ui-monospace, monospace;
-  color: var(--text-dim);
-  padding: 0 8px;
-  border-left: 1px solid var(--line-soft);
-}
-
-/* 窄屏或矮屏（横屏手机）：整条折成一枚菜单按钮，展开成下拉 */
-@media (max-width: 767px), (max-height: 620px) {
-  .toolbar {
-    padding: 2px;
-  }
-
-  .menu-btn {
-    display: grid;
-    place-items: center;
-    width: 32px;
-    height: 26px;
-    padding: 0;
-  }
-
-  .tb-items {
-    position: absolute;
-    top: calc(100% + 6px);
-    right: 0;
-    z-index: 30;
-    display: none;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 2px;
-    min-width: 176px;
-    padding: 6px;
-    /* 矮屏（横屏手机）里这列按钮比视口还高，按到视口底部就截止、
-       在菜单内部滚动，最下面的「退出」也点得到 */
-    max-height: calc(100dvh - var(--chrome-h) - 10px);
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    border: 1px solid var(--line-soft);
-    border-radius: 10px;
-    background: linear-gradient(180deg, rgba(28, 32, 39, 0.98), rgba(14, 16, 21, 0.99));
-    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.62);
-  }
-
-  .toolbar.is-open .tb-items {
-    display: flex;
-  }
-
-  .tb-items > * {
-    width: 100%;
-  }
-
-  .tb-items button {
-    text-align: left;
-    padding: 8px 10px;
-  }
-
-  .seg {
-    justify-content: stretch;
-  }
-
-  .seg button {
-    flex: 1;
-    text-align: center;
-  }
-
-  .vol {
-    margin: 2px 0 0;
-    padding: 8px 10px;
-    border-left: 0;
-    border-top: 1px solid var(--line-soft);
-  }
-
-  .vol input {
-    width: auto;
-    flex: 1;
-  }
 }
 </style>

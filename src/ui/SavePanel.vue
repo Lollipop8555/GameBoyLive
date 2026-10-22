@@ -17,6 +17,8 @@ const props = defineProps<{
   restore: (bytes: Uint8Array) => Promise<void>
   exportSav: () => Promise<void>
   importSav: (file: File) => Promise<void>
+  /** 当前帧存成 PNG 落到下载目录。 */
+  captureShot: () => Promise<void>
 }>()
 
 const emit = defineEmits<{ close: [] }>()
@@ -109,6 +111,13 @@ function exportSavNow() {
   })
 }
 
+function shotNow() {
+  void run('截图中…', async () => {
+    await props.captureShot()
+    notice.value = '截图已保存'
+  })
+}
+
 function pickSav() {
   if (busy.value) return
   fileInput.value?.click()
@@ -178,6 +187,7 @@ onBeforeUnmount(revokeAll)
       <footer class="saves__foot">
         <span class="notice">{{ busy || notice || '即时存档只存在本机，不上传' }}</span>
         <div class="sav-ops">
+          <button class="ghost" :disabled="Boolean(busy)" @click="shotNow">截图 PNG</button>
           <button class="ghost" :disabled="Boolean(busy)" @click="exportSavNow">导出 .sav</button>
           <button class="ghost" :disabled="Boolean(busy)" @click="pickSav">导入 .sav</button>
         </div>

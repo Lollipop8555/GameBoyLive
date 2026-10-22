@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { settings, session } from '../app/store'
 import { SHELLS } from './shells/geometry'
 
-const emit = defineEmits<{ ready: [canvas: HTMLCanvasElement]; pick: [] }>()
+const emit = defineEmits<{ ready: [canvas: HTMLCanvasElement]; pick: []; resume: [] }>()
 
 const canvasEl = ref<HTMLCanvasElement | null>(null)
 
@@ -33,7 +33,14 @@ defineExpose({ canvas: canvasEl })
 </script>
 
 <template>
-  <div class="screen" :class="`filter-${settings.filter}`" :style="{ '--lcd-ratio': ratio }">
+  <div
+    class="screen"
+    :class="[
+      `filter-${settings.filter}`,
+      { 'screen--sharp': settings.sharpPixels, 'screen--framed': settings.screenMask },
+    ]"
+    :style="{ '--lcd-ratio': ratio }"
+  >
     <canvas ref="canvasEl" class="screen__canvas" />
 
     <div class="screen__tint" aria-hidden="true" />
@@ -41,11 +48,17 @@ defineExpose({ canvas: canvasEl })
     <div class="screen__scan" aria-hidden="true" />
     <div class="screen__glass" aria-hidden="true" />
 
-    <!-- 暂停提示画在画面里：不占外部布局，暂停前后屏幕尺寸一模一样 -->
-    <div v-if="paused" class="hold" role="status">
-      <span class="hold__bars" aria-hidden="true"><i /><i /></span>
-      <span class="hold__text">已暂停</span>
-    </div>
+    <!-- 暂停只做两件事：画面在玻璃后面压暗，整块屏幕变成「继续」。
+       HOLD 字样、角标、指示灯都不进画面——那是机身面板上的事 -->
+    <div v-if="paused" class="hold-veil" aria-hidden="true" />
+    <button
+      v-if="paused"
+      class="screen__resume"
+      type="button"
+      aria-label="继续游戏"
+      title="继续游戏"
+      @click="emit('resume')"
+    />
 
     <div
       v-if="!ready"
@@ -91,12 +104,44 @@ defineExpose({ canvas: canvasEl })
   contain: paint;
 }
 
+/* 画布钉死在屏幕格子里：绝对定位 + inset 0，盒子恒等于 .screen。
+   用 `height: 100%` 时，内核写进来的内联 `aspect-ratio` 一旦抢先参与
+   计算，画布就会比格子高/宽出几个像素——超出盒子的那部分弧线在盒子
+   外面，裁剪看起来就"上面直角、下面圆"，正是之前那个毛病 */
 .screen__canvas {
+  position: absolute;
+  inset: 0;
   display: block;
   width: 100%;
   height: 100%;
+}
+
+/* 圆角遮罩（可选，默认关）：半径只有一个来源（ShellGlass 的
+   --screen-radius），外框内缘、画面、画面里的覆盖层共用同一个数，
+   四条弧线才共圆心。父级 overflow 的圆角对画布不一定生效——画布常在
+   独立合成层里——所以在它自身上再画一遍同样的弧。
+   注意：合成层上这条弧在部分浏览器里仍会被忽略，开了也可能还是直角；
+   所以这是个开关，不是默认外观 */
+.screen--framed {
+  border-radius: var(--screen-radius, 0px);
+  clip-path: inset(0 round var(--screen-radius, 0px));
+}
+
+.screen--framed .screen__canvas {
+  border-radius: var(--screen-radius, 0px);
+  clip-path: inset(0 round var(--screen-radius, 0px));
+}
+
+/* 像素锐化：整数放大时保住方块边缘；关掉交给浏览器插值，小屏上更柔和。
+   内核启动时会给 canvas 写内联 `image-rendering: pixelated`，所以关掉这一档
+   必须用 !important 才抢得回来 */
+.screen--sharp .screen__canvas {
   image-rendering: pixelated;
   image-rendering: crisp-edges;
+}
+
+.screen:not(.screen--sharp) .screen__canvas {
+  image-rendering: auto !important;
 }
 
 /* DMG 四阶绿：先降饱和再整体染绿，避免把彩色 GBC 画面也漂白 */
@@ -146,49 +191,41 @@ defineExpose({ canvas: canvasEl })
   mix-blend-mode: normal;
 }
 
-/* 暂停角标：贴在画面右下角，像掌机自带的 HUD，不推开任何外部尺寸 */
-.hold {
+/* 暂停时罩在画面上的那层玻璃：斜向反光 + 极轻压暗，
+   让静止的画面看起来像停在玻璃后面，而不是"卡住了" */
+.hold-veil {
   position: absolute;
-  right: 3.2%;
-  bottom: 3.6%;
-  display: flex;
-  align-items: center;
-  gap: 0.5em;
-  padding: 0.32em 0.78em 0.32em 0.62em;
-  border-radius: 999px;
-  background: rgba(6, 10, 16, 0.6);
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.14),
-    0 2px 10px rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-  color: #ffd27a;
-  font: 600 clamp(8px, 2.3vmin, 11.5px) / 1 ui-monospace, SFMono-Regular, Menlo, monospace;
-  letter-spacing: 0.14em;
+  inset: 0;
   pointer-events: none;
-  animation: hold-in 160ms ease-out both;
+  background:
+    linear-gradient(114deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.02) 20%, transparent 44%),
+    rgba(4, 8, 14, 0.2);
+  animation: veil-in 220ms ease-out both;
 }
 
-.hold__bars {
-  display: flex;
-  gap: 0.16em;
+/* 暂停时整块画面就是「继续」的按钮：不给它画任何外壳，
+   只在悬停时光标变成手，免得跟游戏画面里的东西抢注意力 */
+.screen__resume {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.hold__bars i {
-  width: 0.18em;
-  height: 0.85em;
-  border-radius: 1px;
-  background: currentColor;
+.screen__resume:focus-visible {
+  outline: 1px solid rgba(var(--tint, 150, 205, 255), 0.7);
+  outline-offset: -4px;
 }
 
-@keyframes hold-in {
+@keyframes veil-in {
   from {
     opacity: 0;
-    transform: translateY(3px);
   }
   to {
     opacity: 1;
-    transform: none;
   }
 }
 
@@ -339,7 +376,7 @@ defineExpose({ canvas: canvasEl })
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .hold,
+  .hold-veil,
   .boot,
   .boot::after,
   .boot__logo,

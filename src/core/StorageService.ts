@@ -174,6 +174,16 @@ export function download(name: string, bytes: Uint8Array, type = 'application/oc
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
+/** 已经是 Blob 的内容（截图）走这条路，省得再转一次字节。 */
+export function downloadBlob(name: string, blob: Blob): void {
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = name
+  anchor.click()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
 /** 文件名里不能出现的字符统一换成下划线。 */
 export function safeFileName(name: string): string {
   return name.replace(/[\\/:*?"<>|]+/g, '_').trim() || 'game'

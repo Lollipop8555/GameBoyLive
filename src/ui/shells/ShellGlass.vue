@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import type { Phase } from '../../app/store'
 import type { Model } from '../../core/types'
 
 /**
@@ -12,7 +13,13 @@ const props = defineProps<{
   mode: 'full' | 'focus'
   /** 卡带头里的内部标题：刻在机身上的当前游戏名 */
   title?: string
+  /** 当前帧率：作为丝印参数刻进铭牌，0 表示没在跑、不刻 */
+  fps?: number
+  /** 内核状态：面板右上那颗灯就是它的读数，同时兼任待机键 */
+  phase: Phase
 }>()
+
+const emit = defineEmits<{ 'toggle-pause': [] }>()
 
 const NAMES: Record<Model, { head: string; foot: string; code: string; lcd: string }> = {
   dmg: { head: 'GAME BOY', foot: 'DOT MATRIX · 1989', code: 'DMG-01', lcd: '160 × 144' },
@@ -21,10 +28,25 @@ const NAMES: Record<Model, { head: string; foot: string; code: string; lcd: stri
   agb: { head: 'GAME BOY ADVANCE', foot: '32-BIT · 2001', code: 'AGB-001', lcd: '240 × 160' },
 }
 
+/** 灯旁边的丝印是**状态读数**，不是下一步的动作：正在跑就是 RUN，
+    被按住就是 HOLD。点击会做什么写在 title / aria-label 里 */
+const POWER: Record<Phase, { text: string; aria: string }> = {
+  idle: { text: 'OFF', aria: '未载入卡带' },
+  loading: { text: 'LOAD', aria: '内核载入中' },
+  playing: { text: 'RUN', aria: '运行中，点击暂停' },
+  paused: { text: 'HOLD', aria: '已暂停，点击继续' },
+  error: { text: 'ERR', aria: '内核出错' },
+}
+
 const name = computed(() => NAMES[props.model])
 const key = computed(() => (props.model === 'agb' ? 'agb' : 'gb'))
 /** 没插卡时不印铭牌：首屏已经有「未插卡」的开机画面，别重复 */
 const cart = computed(() => props.title?.trim() || '')
+/** 帧率是参数行的一部分，和 `240 × 160` 同一个字阶，不另做 HUD */
+const fpsText = computed(() => (props.fps && props.fps > 0 ? `${Math.round(props.fps)} FPS` : ''))
+const power = computed(() => POWER[props.phase] ?? POWER.idle)
+/** 没有内核可暂停时这颗键只是状态灯，别让它看起来能按 */
+const powerIdle = computed(() => props.phase !== 'playing' && props.phase !== 'paused')
 </script>
 
 <template>
@@ -35,7 +57,21 @@ const cart = computed(() => props.title?.trim() || '')
 
       <div class="glass__head">
         <span class="glass__model">{{ name.head }}</span>
-        <span class="glass__led" aria-hidden="true" />
+
+        <!-- 这颗灯不是装饰：灯色就是内核状态（待机/载入/运行/暂停/出错），
+             按下去就是暂停与继续。暂停提示留在机身上，不进游戏画面 -->
+        <button
+          class="glass__power"
+          type="button"
+          :data-state="phase"
+          :disabled="powerIdle"
+          :aria-label="power.aria"
+          :title="power.aria"
+          @click="emit('toggle-pause')"
+        >
+          <span class="glass__led" aria-hidden="true" />
+          <span class="glass__power-text" aria-hidden="true">{{ power.text }}</span>
+        </button>
       </div>
 
       <div class="glass__bay">
@@ -43,11 +79,27 @@ const cart = computed(() => props.title?.trim() || '')
         <div v-if="cart" class="glass__plate">
           <span class="plate__row">
             <span>{{ name.foot }}</span>
-            <span>{{ name.code }}</span>
+            <span class="plate__tail">
+              <span>{{ name.code }}</span>
+              <!-- 面板模式没有机身面板，同一颗灯在这里再出现一次：
+                   还在外壳上（铭牌是机壳丝印），不压画面 -->
+              <button
+                class="glass__power glass__power--plate"
+                type="button"
+                :data-state="phase"
+                :disabled="powerIdle"
+                :aria-label="power.aria"
+                :title="power.aria"
+                @click="emit('toggle-pause')"
+              >
+                <span class="glass__led" aria-hidden="true" />
+                <span class="glass__power-text" aria-hidden="true">{{ power.text }}</span>
+              </button>
+            </span>
           </span>
           <span class="plate__row plate__row--game">
             <span class="plate__game">{{ cart }}</span>
-            <span>{{ name.lcd }}</span>
+            <span>{{ name.lcd }}<template v-if="fpsText"> · {{ fpsText }}</template></span>
           </span>
         </div>
 
@@ -60,6 +112,7 @@ const cart = computed(() => props.title?.trim() || '')
           <div class="side side--right">
             <span class="plate__game">{{ cart }}</span>
             <span>{{ name.lcd }}</span>
+            <span v-if="fpsText">{{ fpsText }}</span>
           </div>
         </div>
 
@@ -71,6 +124,7 @@ const cart = computed(() => props.title?.trim() || '')
       <div class="glass__foot">
         <span>{{ name.foot }}</span>
         <span v-if="cart" class="glass__cart">{{ cart }}</span>
+        <span v-if="fpsText" class="glass__fps">{{ fpsText }}</span>
         <span class="glass__mark">GLASS EDITION</span>
       </div>
 
@@ -95,6 +149,11 @@ const cart = computed(() => props.title?.trim() || '')
   --glass-ratio: 0.86;
   --bay-w: 86%;
   --bay-top: 9.5%;
+  /* 衬圈厚度与画面圆角：窗口圆角 = 两者相加，内外弧线才共用同一个圆心。
+     想让画面更圆只改 --screen-radius，窗口会自己跟着走 */
+  --bay-pad: clamp(5px, 1.1vmin, 11px);
+  --screen-radius: clamp(6px, 1.2vmin, 10px);
+  --bay-radius: calc(var(--bay-pad) + var(--screen-radius));
 }
 
 .glass[data-model='dmg'] {
@@ -196,16 +255,128 @@ const cart = computed(() => props.title?.trim() || '')
   white-space: nowrap;
 }
 
-.glass__led {
+/* 指示灯兼待机键：丝印字级 + 一颗 tint 灯，和机身其余铭文同一套语言。
+   放在 head 里所以要有 pointer-events，其余 head 内容仍然不拦鼠标 */
+.glass__power {
   margin-left: auto;
+  margin-right: -0.46em;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.8em;
+  padding: 4px 8px 4px 6px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  font: 600 clamp(7px, 1.1vmin, 9.5px) / 1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.26em;
+  color: rgba(255, 255, 255, 0.42);
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.65);
+  cursor: pointer;
+  pointer-events: auto;
+  transition: color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+}
+
+/* 丝印字距会在末字后留一格，靠负边距吃掉 */
+.glass__power-text {
+  margin-right: -0.26em;
+}
+
+.glass__power:hover:not(:disabled) {
+  color: rgba(255, 255, 255, 0.84);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.glass__power:disabled {
+  cursor: default;
+  color: rgba(255, 255, 255, 0.26);
+}
+
+.glass__power:focus-visible {
+  outline: 1px solid rgba(var(--tint), 0.75);
+  outline-offset: 2px;
+}
+
+/* 暂停时这颗键要能被一眼找到：暖色字 + 一圈很淡的描边，
+   但仍是蚀刻铭牌，不是荧光按钮 */
+.glass__power[data-state='paused'] {
+  color: rgba(255, 206, 148, 0.95);
+  background: rgba(255, 178, 74, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(255, 178, 74, 0.26);
+}
+
+/* 灯：本体 + 两层光晕，亮度与颜色全交给 data-state */
+.glass__led {
   width: clamp(4px, 0.7vmin, 6px);
   aspect-ratio: 1;
   border-radius: 50%;
-  background: rgb(var(--tint));
+  background: rgb(var(--led, var(--tint)));
   box-shadow:
-    0 0 8px rgba(var(--tint), 0.9),
-    0 0 18px rgba(var(--tint), 0.45),
+    0 0 8px rgba(var(--led, var(--tint)), var(--led-glow, 0.9)),
+    0 0 18px rgba(var(--led, var(--tint)), calc(var(--led-glow, 0.9) * 0.45)),
     inset 0 0 2px rgba(255, 255, 255, 0.9);
+}
+
+.glass__power[data-state='idle'] {
+  --led: 108, 122, 140;
+  --led-glow: 0;
+}
+
+.glass__power[data-state='loading'] {
+  --led: 120, 200, 255;
+  --led-glow: 0.8;
+}
+
+.glass__power[data-state='playing'] {
+  --led: var(--tint);
+  --led-glow: 0.9;
+}
+
+.glass__power[data-state='paused'] {
+  --led: 255, 178, 74;
+  --led-glow: 0.95;
+}
+
+.glass__power[data-state='error'] {
+  --led: 255, 96, 96;
+  --led-glow: 0.85;
+}
+
+/* 载入中闪、暂停时像呼吸，运行时常亮——三种节奏各不相同，光是看灯就知道在干嘛 */
+.glass__power[data-state='loading'] .glass__led {
+  animation: led-blink 1s ease-in-out infinite;
+}
+
+.glass__power[data-state='paused'] .glass__led {
+  animation: led-breathe 1.7s ease-in-out infinite;
+}
+
+@keyframes led-blink {
+  0%,
+  40% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0.22;
+  }
+}
+
+@keyframes led-breathe {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glass__power[data-state='loading'] .glass__led,
+  .glass__power[data-state='paused'] .glass__led {
+    animation: none;
+    opacity: 1;
+  }
 }
 
 /* 屏幕仓：一圈内凹的金属衬圈，把屏幕压进玻璃里 */
@@ -215,8 +386,8 @@ const cart = computed(() => props.title?.trim() || '')
   left: 50%;
   width: var(--bay-w);
   transform: translateX(-50%);
-  padding: clamp(5px, 1.1vmin, 11px);
-  border-radius: 10px;
+  padding: var(--bay-pad);
+  border-radius: var(--bay-radius);
   background: linear-gradient(168deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.03) 46%, rgba(0, 0, 0, 0.34));
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.4),
@@ -225,9 +396,10 @@ const cart = computed(() => props.title?.trim() || '')
     0 14px 34px -10px rgba(0, 0, 0, 0.9);
 }
 
+/* 屏幕凹口的圆角就是画面圆角；这里不再 overflow: hidden——
+   遮罩由 Screen 自己按同一半径裁，关掉开关时才能真的露出直角 */
 .glass__bay-inner {
-  border-radius: 6px;
-  overflow: hidden;
+  border-radius: var(--screen-radius);
   background: #05070a;
   box-shadow:
     inset 0 0 0 1px rgba(0, 0, 0, 0.9),
@@ -260,6 +432,20 @@ const cart = computed(() => props.title?.trim() || '')
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* 帧率也是刻上去的参数，不是浮在界面上的读数：
+   等宽数字 + 同一档丝印色，靠右停在 GLASS EDITION 前面 */
+.glass__fps {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: rgba(var(--tint), 0.62);
+  font-variant-numeric: tabular-nums;
+}
+
+/* fps 在时，右对齐由它接手，标记只跟在后面，两个 auto 才不会把中间撑开 */
+.glass__fps + .glass__mark {
+  margin-left: clamp(6px, 1.6%, 14px);
 }
 
 .glass__mark {
@@ -363,6 +549,7 @@ const cart = computed(() => props.title?.trim() || '')
 
 .glass[data-mode='focus'] .glass__mesh,
 .glass[data-mode='focus'] .glass__ribs,
+/* 机身面板没了，但灯不能跟着没了：它的另一份长在屏幕上方那块铭牌里 */
 .glass[data-mode='focus'] .glass__head,
 .glass[data-mode='focus'] .glass__foot,
 .glass[data-mode='focus'] .screw,
@@ -373,6 +560,11 @@ const cart = computed(() => props.title?.trim() || '')
   display: none;
 }
 
+/* 面板模式的衬圈薄一点，但内外圆角仍共用同一个圆心 */
+.glass[data-mode='focus'] {
+  --bay-pad: clamp(4px, 1.2vmin, 10px);
+}
+
 /* 面板模式沿用整机那一圈衬圈：外层金属圈 + 内层屏幕凹口，
    只把尺寸从"按机身比例"改成"贴住屏幕"，边框语言完全一致 */
 .glass[data-mode='focus'] .glass__bay {
@@ -380,9 +572,9 @@ const cart = computed(() => props.title?.trim() || '')
   inset: auto;
   width: max-content;
   max-width: 100%;
-  padding: clamp(4px, 1.2vmin, 10px);
+  padding: var(--bay-pad);
   transform: none;
-  border-radius: 12px;
+  border-radius: var(--bay-radius);
   background: linear-gradient(168deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.03) 46%, rgba(0, 0, 0, 0.34));
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.4),
@@ -426,6 +618,19 @@ const cart = computed(() => props.title?.trim() || '')
   color: rgba(226, 238, 252, 0.46);
 }
 
+/* 铭牌右端：机型号 + 那颗灯。和 head 里那颗是同一个按钮、同一套配色，
+   只是字号跟着铭牌的字阶走 */
+.plate__tail {
+  display: inline-flex;
+  align-items: center;
+  gap: clamp(6px, 1.6cqh, 14px);
+}
+
+.glass__power--plate {
+  margin: 0 -0.46em 0 0;
+  padding: 2px 6px 2px 2px;
+}
+
 /* 右侧参数不参与压缩，超长的是左边的游戏名 */
 .plate__row > :last-child {
   flex-shrink: 0;
@@ -445,7 +650,7 @@ const cart = computed(() => props.title?.trim() || '')
 }
 
 .glass[data-mode='focus'] .glass__bay-inner {
-  border-radius: 6px;
+  border-radius: var(--screen-radius);
   background: #05070a;
   box-shadow:
     inset 0 0 0 1px rgba(0, 0, 0, 0.9),
@@ -468,16 +673,48 @@ const cart = computed(() => props.title?.trim() || '')
      同一圈金属衬圈把三块一起包住，铭文落在边框里面 */
   .glass[data-mode='focus'] .glass__bay {
     grid-template-columns: auto auto auto;
-    grid-template-areas: 'left screen right';
+    /* 第二行只放状态灯：它横跨整条屏幕宽，右端对齐屏幕右沿 */
+    grid-template-areas:
+      'left screen right'
+      '. stat .';
     column-gap: clamp(5px, 1.2cqh, 10px);
+  }
+
+  .glass[data-mode='focus'] .glass__plate {
+    grid-area: stat;
   }
 
   .glass[data-mode='focus'] .glass__bay-inner {
     grid-area: screen;
   }
 
-  /* 只留铭牌在屏幕上方，横屏改由两侧竖排接手 */
+  /* 横屏的竖排铭文接管了机型参数，铭牌本身收掉；
+     但状态灯不能跟着没——它退化成一行「只有灯」，落到屏幕下沿与底框之间 */
   .glass[data-mode='focus'] .glass__plate {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0;
+    /* 上边让出的距离 = 下面那圈衬圈（--bay-pad）：
+       灯正好在「屏幕下沿 → 底框内沿」这条带子里上下居中 */
+    margin: var(--bay-pad) 0 0;
+    padding: 0;
+    border-bottom: 0;
+  }
+
+  .glass[data-mode='focus'] .plate__row {
+    display: none;
+  }
+
+  .glass[data-mode='focus'] .plate__row:first-of-type {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+  }
+
+  /* 机型名和型号已经在两侧竖排里印过了，这里只留灯 */
+  .glass[data-mode='focus'] .plate__row:first-of-type > span:first-child,
+  .glass[data-mode='focus'] .plate__tail > span {
     display: none;
   }
 }
