@@ -23,6 +23,7 @@
 | G7 | **本地存档** | SRAM 自动落盘、4 个即时存档槽、`.sav` 导出/导入 |
 | G8 | **GitHub Pages 可直接部署** | `push main` → Actions 构建 → 线上可玩，无 COOP/COEP 头依赖 |
 | G9 | **两种显示模式** | `完整`：整壳 + 每个按键旁显示当前键位映射；`特写`：只剩上盖屏幕，切换不断流 |
+| G10 | **可安装、可离线开外壳** | 产物带 manifest + Service Worker：Android/桌面 Chrome 可「安装」，断网刷新仍能打开外壳 |
 
 ### 非目标（v1 明确不做）
 
@@ -30,7 +31,7 @@
 - 不做联机对战 / 联机交换（核心支持本地 link，但需要多人协调，v2 再评估）。
 - 不做云存档 / 账号体系（纯本地存储）。
 - 不做金手指（Cheat）编辑器。
-- 不做 PWA 离线安装（v2 候选：Service Worker 预缓存 wasm）。
+- PWA **只缓存外壳**（HTML/JS/CSS/图标 + 首次加载用到的 wasm），不做 ROM 离线投递：卡带文件不进缓存，那是用户的文件，不该由我们留副本。
 
 ---
 
@@ -142,9 +143,12 @@ GameBoyLive/
 ├─ .github/workflows/deploy.yml     # 构建 + 发布到 GitHub Pages
 ├─ public/
 │  ├─ .nojekyll                     # 防止 Jekyll 吞掉 _ 开头资源
-│  └─ favicon.svg
+│  ├─ favicon.svg
+│  ├─ manifest.webmanifest          # PWA 清单（可安装）
+│  ├─ sw.js                         # 外壳缓存（不做 ROM 缓存）
+│  └─ icons/                        # icon.svg / maskable.svg
 ├─ src/
-│  ├─ main.ts                       # createApp + 全局错误边界
+│  ├─ main.ts                       # createApp + 全局错误边界 + SW 注册（仅产物）
 │  ├─ app/
 │  │  ├─ App.vue                    # 布局 + 状态机（idle/loading/playing/paused）
 │  │  └─ store.ts                   # reactive() 单例：settings + session（不引 Pinia）
@@ -154,6 +158,7 @@ GameBoyLive/
 │  │  ├─ romInfo.ts                 # 文件头嗅探：机型/标题/容量/校验
 │  │  ├─ InputManager.ts            # 键位映射 + 触控合成事件 + 冲突处理
 │  │  ├─ StorageService.ts          # IndexedDB / OPFS / localStorage 统一封装
+│  │  ├─ WakeLock.ts                # 屏幕常亮（运行时持有，暂停/后台即释放）
 │  │  ├─ keyLabel.ts                # KeyboardEvent.code → 可读键位标签（U+2191 / A / R⇧）
 │  │  └─ exports.ts                 # .sav 导出、截图下载、存档导入
 │  ├─ ui/
@@ -266,7 +271,15 @@ interface EmulatorAdapter {
 
 动作集合：`Up Down Left Right A B L R Start Select`（GBA 全量，GB 隐藏 L/R）。
 
-1. **键盘映射**：`settings.keymap: Record<KeyAction, KeyboardEvent.code | null>` → localStorage。
+1. **键盘映射**：`settings.keymap: Record<KeyAction, KeyboardEvent.code | null>` → localStorage。默认布局：
+
+   | 动作 | 默认键 | 动作 | 默认键 |
+   |---|---|---|---|
+   | 上 / 下 / 左 / 右 | `W` / `S` / `A` / `D` | A / B | `L` / `K` |
+   | Start / Select | `B` / `V` | L / R（GBA） | `Q` / `O` |
+
+   旧版本默认（方向键 + `Z`/`X` + `A`/`S` + `↵`/`⇧`，以及上一版 `WASD`/`K`/`L`/`V`/`B` + 肩键 `I`/`O`）会在载入时整体迁移成当前默认——只在存档里的键位**一个都没改过**时才换，动过一个键就原样保留。
+
    - 编辑：点击动作行 → 「请按键」→ 捕获 `e.code` → 唯一性校验（冲突则提示并询问是否交换）→ 立即生效（`engine.setInput`）。
    - 生成完整映射：`{ 'p1.up': code ?? '', ... }`（空串即解绑，见 §2.3）。
    - 应用层热键与映射隔离：`Esc` 打开暂停菜单、`F11`/按钮全屏；仅当该 `code` 未被映射时生效。
@@ -287,6 +300,7 @@ interface EmulatorAdapter {
 - **`.sav` 导出**：读 OPFS `sram.bin` → 触发下载 `<title>.sav`。
 - **`.sav` 导入**：`pause()` → `destroy()`（会写旧 SRAM）→ 覆盖 OPFS `sram.bin` → 重新 `boot()`（`reset()` 不会重读磁盘，必须重建）。
 - **即时存档**：`saveState()` 字节 + `screenshot()` 缩略图入 IDB；读档前校验字节长度（跨机型/跨版本会抛错），失败给出可读提示。
+- **存档保护**：启动时调 `navigator.storage.persist()` 换取浏览器的「不清理」承诺（`store.device.durable`）。被拒不影响玩，但存储吃紧时 IndexedDB / OPFS 可能被静默清掉，因此「关于」里如实显示状态并提供重试按钮。
 
 ### 4.6 状态机
 
@@ -298,6 +312,8 @@ idle ──拖入/选择 ROM──► loading ──ready──► playing ⇄ p
 
 - `loading` 覆盖层显示内核下载/初始化进度（wasm 首次 ~790 KB）。
 - 首次 `AudioContext` 必须在用户手势内 `resume()`，否则 `AudioContext` 会挂起 → 提供「点击开始」遮罩。
+- **切到后台**：`visibilitychange` 隐藏时暂停并放掉常亮——看不见的画面继续跑只是白烧 CPU 和电；回到前台只恢复「因隐藏而暂停」的那一次，用户手动按下的暂停不替他恢复（存档面板开着时也不恢复）。
+- **屏幕常亮**：`playing` 时持有 Screen Wake Lock，`paused` / `idle` / `error` / 卸载即释放；并发申请会合并成一次。不支持（Safari < 16.4、非安全上下文）或被系统拒绝时静默跳过，不影响游戏。
 
 ---
 
@@ -309,7 +325,7 @@ idle ──拖入/选择 ROM──► loading ──ready──► playing ⇄ p
 - **两种显示模式**：`完整`（整壳 + 按键旁键位徽章，上手期）/ `特写`（只剩上盖屏幕，沉浸期），详见 §4.3.1。工具栏按钮一键切换，状态持久化。
 - **暂停遮罩**：4 个存档槽（缩略图 + 相对时间 + 覆盖确认）、导出/导入存档、截图、退出到首屏。
 - **画面圆角遮罩（可选，默认关）**：开启时衬圈厚度 + 画面圆角 = 窗口外圆角（`--bay-pad + --screen-radius`），三者只有一个来源，内外两条弧线共圆心、平行；画布用 `position: absolute; inset: 0` 钉死在格子里，弧线同时画在格子和画布两处（`border-radius` + `clip-path`）。**已知限制**：画布（尤其 WebGL 合成层）上的圆角裁切在部分浏览器里会被忽略，开了也可能仍是直角，所以不设成默认外观，设置页里也直说了。
-- **设置面板**：`显示`（显示模式、键位徽章开关、滤镜、像素锐化、圆角遮罩、触控层透明度）| `按键`（键位表 + 恢复默认）| `声音`（音量/静音）| `关于`（内核版本、许可、无 ROM 声明）。
+- **设置面板**：`显示`（显示模式、键位徽章开关、滤镜、像素锐化、圆角遮罩、触控层透明度）| `按键`（键位表 + 恢复默认）| `声音`（音量/静音）| `关于`（内核版本、许可、无 ROM 声明、存档保护状态）。
 - **空/异常态**：无 ROM、坏 ROM、超过 32 MB、wasm 加载失败、浏览器不支持 —— 屏幕内直接说明原因并给出下一步动作（点整块屏幕即可重选）。
 - **可访问性**：所有外壳按钮带 `role="button"` + `aria-label` + 键盘可达（`Tab` + `Space/Enter`）；对比度 ≥ 4.5:1。
 
@@ -324,6 +340,9 @@ idle ──拖入/选择 ROM──► loading ──ready──► playing ⇄ p
 | OPFS | Chrome 111+/Safari 16.4+/FF 111+ | 不可用时 SRAM 仅内存保留 + 强提示手动导出 |
 | `DecompressionStream`（zip ROM） | Chrome 80+/Safari 16.4+ | 不可用时提示先解压 |
 | 触控 | Pointer Events | 使用 `pointer` 事件统一鼠标/触摸/笔 |
+| Screen Wake Lock | Chrome 84+/Safari 16.4+ | 不可用或申请被拒：不常亮，游戏照常 |
+| Service Worker | 全主流（需 https / localhost） | 注册失败只是没有离线能力；`file://` 打开则完全没有 |
+| `navigator.storage.persist()` | Chrome 55+/Safari 15.2+ | 被拒时存档仍可用，只是可能被浏览器在存储紧张时清理（「关于」里如实标注） |
 
 目标基线：**iOS Safari 16.4+ / Android Chrome 111+ / 桌面 Chrome、Edge、Firefox、Safari 最新两个大版本**。
 
@@ -353,6 +372,7 @@ jobs:
 - `vite.config.ts`：`base: './'`（用户页与项目页通用）、`build.assetsInlineLimit: 0`、`assetsInclude: ['**/*.wasm']`。
 - `public/.nojekyll` 必须存在。
 - **不需要** COOP/COEP 响应头（这正是选 `@wasm-gaming/mgba-wasm` 的核心原因）；`.wasm` 由 GitHub Pages 以 `application/wasm` 正确返回。
+- **PWA**：`public/manifest.webmanifest` + `public/sw.js`。SW 只在产物里注册（`import.meta.env.PROD`），dev 下不注册以免缓存搅乱热更新；注册用相对路径 `new URL('sw.js', document.baseURI)`，`base: './'` 部署到项目页子路径时 scope 仍落在 `/<repo>/`。缓存策略：导航请求网络优先（重新部署立刻生效）、静态资源缓存优先；`*.gb|gbc|gba|zip` 明确不进缓存。
 - 本地调试：`npm run dev`（HTTPS 不需要，localhost 属安全上下文）。
 - 流水线已入库：`.github/workflows/deploy.yml`（push 到 `main` 即构建并发布），仓库需在 Settings → Pages 里把 Source 设为 GitHub Actions。
 

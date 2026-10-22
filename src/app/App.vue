@@ -8,6 +8,7 @@ import { readRom } from '../core/romInfo'
 import { readRomData, saveRom } from '../core/RomLibrary'
 import { download, downloadBlob, readSram, safeFileName, writeSram } from '../core/StorageService'
 import type { RomInfo } from '../core/types'
+import { acquireWakeLock, releaseWakeLock } from '../core/WakeLock'
 import Dropzone from '../ui/Dropzone.vue'
 import KeymapPanel from '../ui/KeymapPanel.vue'
 import LibraryPanel from '../ui/LibraryPanel.vue'
@@ -18,7 +19,7 @@ import ShellGlass from '../ui/shells/ShellGlass.vue'
 import { GLASS_RATIO } from '../ui/shells/geometry'
 import Toolbar from '../ui/Toolbar.vue'
 import TouchDeck from '../ui/TouchDeck.vue'
-import { followViewport, settings, session, toggleDisplayMode, ui } from './store'
+import { askDurableStorage, followViewport, settings, session, toggleDisplayMode, ui } from './store'
 
 const adapter = shallowRef<EmulatorAdapter | null>(null)
 const canvasEl = ref<HTMLCanvasElement | null>(null)
@@ -89,6 +90,7 @@ async function bootEngine(bytes: Uint8Array, info: RomInfo) {
 
   next.setInput(toEngineInput(settings.keymap, info.system))
   paused.value = false
+  pausedByHidden = false
   session.phase = 'playing'
 }
 
@@ -171,7 +173,39 @@ function togglePause() {
   }
 }
 
+/* ---------------- 后台暂停 · 屏幕常亮 ---------------- */
+
+/** 因切到后台才暂停的标记：回来只恢复这一种，用户自己按的暂停不动 */
+let pausedByHidden = false
+
+function onVisibility() {
+  if (document.hidden) {
+    // 看不见的画面还在跑，只会白烧 CPU 和电
+    releaseWakeLock()
+    const engine = adapter.value
+    if (!engine || session.phase !== 'playing' || paused.value) return
+    engine.pause()
+    paused.value = true
+    session.phase = 'paused'
+    pausedByHidden = true
+    return
+  }
+
+  if (pausedByHidden) {
+    pausedByHidden = false
+    const engine = adapter.value
+    // 面板开着时本来就该停着，别替用户把它跑起来
+    if (engine && session.phase === 'paused' && paused.value && !ui.saveOpen) {
+      engine.resume()
+      paused.value = false
+      session.phase = 'playing'
+    }
+  }
+  if (session.phase === 'playing') void acquireWakeLock()
+}
+
 function exitToIdle() {
+  pausedByHidden = false
   adapter.value?.destroy()
   adapter.value = null
   romBytes.value = null
@@ -358,6 +392,15 @@ watch(
   },
 )
 
+/** 常亮只跟运行状态走：暂停、出错、退出都放掉，别让屏幕替我们亮着 */
+watch(
+  () => session.phase,
+  (phase) => {
+    if (phase === 'playing') void acquireWakeLock()
+    else releaseWakeLock()
+  },
+)
+
 onMounted(() => {
   // 跑不起来的环境在首屏就说清楚，别等用户拖进 ROM
   const blocked = checkEnvironment()
@@ -375,6 +418,10 @@ onMounted(() => {
   window.addEventListener('drop', onDrop)
   // 拖窗口或切设备模拟时视口跳档，模式要跟着走
   window.addEventListener('resize', followViewport)
+  // 切走标签页：暂停并放掉常亮；切回来按需恢复
+  document.addEventListener('visibilitychange', onVisibility)
+  // 存档安全：让浏览器承诺不清理本站存储（被拒也没关系，只会少一层保护）
+  void askDurableStorage()
 })
 
 onBeforeUnmount(() => {
@@ -385,6 +432,8 @@ onBeforeUnmount(() => {
   window.removeEventListener('dragleave', onDragLeave)
   window.removeEventListener('drop', onDrop)
   window.removeEventListener('resize', followViewport)
+  document.removeEventListener('visibilitychange', onVisibility)
+  releaseWakeLock()
   adapter.value?.destroy()
 })
 </script>

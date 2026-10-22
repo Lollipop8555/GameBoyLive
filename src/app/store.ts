@@ -1,5 +1,5 @@
 import { reactive, watch } from 'vue'
-import { DEFAULT_KEYMAP, normalizeKeymap, type Keymap } from '../core/InputManager'
+import { DEFAULT_KEYMAP, migrateKeymap, type Keymap } from '../core/InputManager'
 import type { RomInfo } from '../core/types'
 
 export type Phase = 'idle' | 'loading' | 'playing' | 'paused' | 'error'
@@ -86,7 +86,7 @@ function loadSettings(): Settings {
         : base.displayMode,
       modePinned: pinned,
       volume: typeof saved.volume === 'number' ? Math.min(1, Math.max(0, saved.volume)) : base.volume,
-      keymap: normalizeKeymap(saved.keymap),
+      keymap: migrateKeymap(saved.keymap),
     }
   } catch {
     return base
@@ -106,6 +106,29 @@ export const ui = reactive({
   /** 最近游戏：打开时游戏暂停，选完直接换 ROM。 */
   libraryOpen: false,
 })
+
+/**
+ * 设备承诺（不落盘）：`durable` 是浏览器有没有答应不清理本站存储——
+ * 即时存档在 IndexedDB、卡带存档在 OPFS，都吃这一条。null = 还没问过。
+ */
+export const device = reactive({ durable: null as boolean | null })
+
+/**
+ * 申请持久化存储。成不成都不影响玩；被拒时由「关于」里那行提示用户
+ * 定期导出——存储紧张时浏览器可以静默清掉 IndexedDB / OPFS。
+ */
+export async function askDurableStorage(): Promise<void> {
+  const storage = typeof navigator === 'undefined' ? undefined : navigator.storage
+  if (!storage?.persist) {
+    device.durable = false
+    return
+  }
+  try {
+    device.durable = (await storage.persisted()) || (await storage.persist())
+  } catch {
+    device.durable = false
+  }
+}
 
 export const session = reactive<Session>({
   phase: 'idle',

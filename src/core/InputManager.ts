@@ -2,18 +2,68 @@ import type { KeyAction, System } from './types'
 
 export type Keymap = Record<KeyAction, string | null>
 
-/** 桌面默认布局：方向键 + Z/X（B/A）+ A/S（L/R）+ Enter（↵）/ 右 Shift。 */
+/**
+ * 桌面默认布局：左手 WASD 走方向，右手 K/L 是 B/A、V/B 是 Select/Start，
+ * L/R 用右手上排的 Q/O（GBA 专用，左手腾不出来）。
+ */
 export const DEFAULT_KEYMAP: Keymap = {
-  up: 'ArrowUp',
-  down: 'ArrowDown',
-  left: 'ArrowLeft',
-  right: 'ArrowRight',
-  a: 'KeyX',
-  b: 'KeyZ',
-  l: 'KeyA',
-  r: 'KeyS',
-  start: 'Enter',
-  select: 'ShiftRight',
+  up: 'KeyW',
+  down: 'KeyS',
+  left: 'KeyA',
+  right: 'KeyD',
+  a: 'KeyL',
+  b: 'KeyK',
+  l: 'KeyQ',
+  r: 'KeyO',
+  start: 'KeyB',
+  select: 'KeyV',
+}
+
+/**
+ * 曾经发出去过的默认键位。只用来识别「存档里那份键位其实是从来没改过的默认值」。
+ */
+const LEGACY_KEYMAPS: Keymap[] = [
+  // 更早的默认：方向键 + Z/X + A/S + ↵ / 右 Shift
+  {
+    up: 'ArrowUp',
+    down: 'ArrowDown',
+    left: 'ArrowLeft',
+    right: 'ArrowRight',
+    a: 'KeyX',
+    b: 'KeyZ',
+    l: 'KeyA',
+    r: 'KeyS',
+    start: 'Enter',
+    select: 'ShiftRight',
+  },
+  // 上一版默认：WASD + K/L + V/B，肩键 I/O
+  {
+    up: 'KeyW',
+    down: 'KeyS',
+    left: 'KeyA',
+    right: 'KeyD',
+    a: 'KeyL',
+    b: 'KeyK',
+    l: 'KeyI',
+    r: 'KeyO',
+    start: 'KeyB',
+    select: 'KeyV',
+  },
+]
+
+/**
+ * 老存档迁移：键位**逐个等于**某一份旧默认时整体换成当前默认；
+ * 只要用户动过一个键，就一个都不碰。
+ */
+export function migrateKeymap(input: unknown): Keymap {
+  if (input && typeof input === 'object') {
+    const source = input as Partial<Record<KeyAction, unknown>>
+    const untouched = LEGACY_KEYMAPS.some((legacy) =>
+      (Object.keys(legacy) as KeyAction[]).every((action) => source[action] === legacy[action]),
+    )
+    if (untouched) return { ...DEFAULT_KEYMAP }
+  }
+  return normalizeKeymap(input)
 }
 
 const GB_ACTIONS: KeyAction[] = ['up', 'down', 'left', 'right', 'a', 'b', 'start', 'select']

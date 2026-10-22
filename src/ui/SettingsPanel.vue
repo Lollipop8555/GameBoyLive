@@ -3,7 +3,16 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { DEFAULT_KEYMAP, actionsFor } from '../core/InputManager'
 import { ACTION_LABEL, formatKeyLabel } from '../core/keyLabel'
 import { clearLibrary, listRoms } from '../core/RomLibrary'
-import { effectiveFilter, setDisplayMode, settings, session, type FilterId, type TouchLayerMode } from '../app/store'
+import {
+  askDurableStorage,
+  device,
+  effectiveFilter,
+  setDisplayMode,
+  settings,
+  session,
+  type FilterId,
+  type TouchLayerMode,
+} from '../app/store'
 
 const emit = defineEmits<{ close: []; keys: [] }>()
 
@@ -228,6 +237,19 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
             <dt>快捷键</dt>
             <dd><kbd>`</kbd> 切换整机 / 面板 · <kbd>Esc</kbd> 暂停 · 面板内 <kbd>Esc</kbd> 关闭</dd>
           </dl>
+
+          <div class="row">
+            <span class="row__label">存档保护</span>
+            <span class="count">{{ device.durable ? '已开启' : '未开启' }}</span>
+            <button v-if="!device.durable" class="ghost" @click="askDurableStorage">申请</button>
+          </div>
+          <p class="note">
+            {{
+              device.durable
+                ? '浏览器已承诺不清理本站数据，即时存档与卡带存档不会因为存储紧张被悄悄清掉。'
+                : '浏览器还没承诺保留本站数据：存储吃紧时可能清掉即时存档与卡带存档，重要进度请导出 .sav。'
+            }}
+          </p>
 
           <div class="row">
             <span class="row__label">缓存 ROM</span>
